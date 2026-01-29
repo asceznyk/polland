@@ -17,7 +17,7 @@ int ends_with_double_crlf(const char *buf, size_t len) {
 }
 
 void print_escaped(const char *buf, ssize_t n) {
-  if(n) printf("print_escaped: \t");
+  if (n) printf("print_escaped:\t");
   for (ssize_t i = 0; i < n; i++) {
     unsigned char c = buf[i];
     if (c == '\r') printf("\\r");

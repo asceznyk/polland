@@ -3,7 +3,8 @@
 
 #define PORT 6969
 #define BUFFER_SIZE 8192
-#define NUM_CONCURRENT 10
+#define NUM_BACKLOG 10
+#define MAX_EVENTS 64
 
 #define STATIC_LOCATION "/var/www/html"
 
