@@ -6,9 +6,9 @@
 #include "defs.h"
 #include "utils.h"
 #include "client.h"
-#include "http_response.h"
+#include "http.h"
 
-void close_and_free_client(struct client_state *client) {
+void close_and_free_client(int epfd, struct client_state *client) {
   epoll_ctl(epfd, EPOLL_CTL_DEL, client->fd, NULL);
   close(client->fd);
   free(client);
@@ -31,7 +31,7 @@ void register_client(int epfd, int client_fd) {
   fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
   if (epoll_ctl(epfd, EPOLL_CTL_ADD, client->fd, &evt) < 0) {
     perror("epoll_ctl");
-    close_and_free_client(client);
+    close_and_free_client(epfd, client);
   }
 }
 
@@ -58,8 +58,22 @@ void switch_rw_state(int epfd, struct client_state *client, bool add_write) {
   evt.data.ptr = client;
   if (epoll_ctl(epfd, EPOLL_CTL_MOD, client->fd, &evt) < 0) {
     perror("epoll_ctl MOD");
-    close_and_free_client(client);
+    close_and_free_client(epfd, client);
   }
+}
+
+static void consume_request_header(struct client_state *client, size_t n) {
+  if (n == 0) return;
+  if (n >= client->in_len) {
+    client->in_len = 0;
+    return;
+  }
+  memmove(
+    client->in_buf,
+    client->in_buf + n,
+    client->in_len - n
+  );
+  client->in_len -= n;
 }
 
 void handle_client_read(int epfd, struct client_state *client) {
@@ -71,7 +85,7 @@ void handle_client_read(int epfd, struct client_state *client) {
     );
     if (bytes_read == 0) {
       printf("client connection closed!, bytes_read == 0\n");
-      close_and_free_client(client);
+      close_and_free_client(epfd, client);
       break;
     }
     if (bytes_read < 0) {
@@ -79,7 +93,7 @@ void handle_client_read(int epfd, struct client_state *client) {
       else if (errno == EAGAIN || errno == EWOULDBLOCK) break;
       else {
         printf("client connection closed!, ohh shit!\n");
-        close_and_free_client(client);
+        close_and_free_client(epfd, client);
         break;
       }
     }
@@ -89,11 +103,16 @@ void handle_client_read(int epfd, struct client_state *client) {
       client->in_len, client->in_pos
     );
     print_escaped(client->in_buf, client->in_len);
-    if (ends_with_double_crlf(client->in_buf, client->in_len)) {
+    ssize_t hdr_end = -1;
+    if ((
+      hdr_end = find_double_crlf(
+        client->in_buf, client->in_len, client->in_pos
+      )
+    ) != -1) {
       build_http_response(client);
-      client->in_pos = client->in_len;
+      consume_request_header(client, hdr_end);
       switch_rw_state(epfd, client, 1);
-      printf("client request recieved!\n");
+      printf("client request consumed!\n");
       break;
     }
   }
@@ -105,8 +124,6 @@ void reset_client_out_buf(struct client_state *client) {
   client->out_buf = NULL;
   client->out_len = 0;
   client->out_sent = 0;
-  printf("reset!!!\n");
-  printf("client->fd = %d, client->out_len = %ld\n", client->fd, client->out_len);
 }
 
 void handle_client_write(int epfd, struct client_state *client) {
@@ -125,7 +142,7 @@ void handle_client_write(int epfd, struct client_state *client) {
     printf("bytes_written = %ld\n", bytes_written);
     if (bytes_written == 0) {
       printf("client connection closed!, bytes_written == 0\n");
-      close_and_free_client(client);
+      close_and_free_client(epfd, client);
       break;
     }
     if (bytes_written > 0) {
@@ -135,7 +152,7 @@ void handle_client_write(int epfd, struct client_state *client) {
       printf("bytes_written < 0?\n");
       if (errno == EAGAIN || errno == EWOULDBLOCK)
         return;
-      close_and_free_client(client);
+      close_and_free_client(epfd, client);
       return;
     }
   }

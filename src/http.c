@@ -7,7 +7,7 @@
 #include "defs.h"
 #include "client.h"
 #include "utils.h"
-#include "http_response.h"
+#include "http.h"
 
 char *not_found =
   "HTTP/1.1 404 Not Found\r\n"
@@ -123,14 +123,14 @@ void put_http_response(
 void build_http_response(struct client_state *client) {
   if (client->in_len <= 0) return;
   int client_fd = client->fd;
-  char *method = get_http_method(client->in_buf + client->in_pos);
+  char *method = get_http_method(client->in_buf);
   if (strcmp(method, "GET") != 0) return;
   if (!strcmp(STATIC_LOCATION, "")) {
     fill_client_not_found(client);
     free(method);
     return;
   }
-  char *path = get_file_path_url(client->in_buf + client->in_pos, method);
+  char *path = get_file_path_url(client->in_buf, method);
   int file_fd = static_resolve_path(path);
   put_http_response(client, path, file_fd);
   free(path);

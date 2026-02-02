@@ -25,7 +25,7 @@ struct client_state {
 
 void add_client_conn(int epfd, int server_fd);
 
-void close_and_free_client(struct client_state *client);
+void close_and_free_client(int epfd, struct client_state *client);
 
 void handle_client_read(int epfd, struct client_state *client);
 

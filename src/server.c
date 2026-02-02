@@ -71,7 +71,7 @@ int main() {
       }
       struct client_state *client = sevents[i].data.ptr;
       if (events & (EPOLLERR | EPOLLHUP)) {
-        close_and_free_client(client);
+        close_and_free_client(epfd, client);
         continue;
       }
       if (events & (EPOLLIN | EPOLLRDHUP)) {

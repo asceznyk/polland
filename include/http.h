@@ -1,5 +1,5 @@
-#ifndef HTTP_RESPONSE_H
-#define HTTP_RESPONSE_H
+#ifndef HTTP_H
+#define HTTP_H
 
 #include "client.h"
 
