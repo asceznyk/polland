@@ -66,19 +66,19 @@ int main() {
     for (int i = 0; i < n; i++) {
       uint32_t events = sevents[i].events;
       if (sevents[i].data.fd == server_fd) {
-        add_client_conn(epfd, server_fd);
+        client_accept_conn(epfd, server_fd);
         continue;
       }
       struct client_state *client = sevents[i].data.ptr;
       if (events & (EPOLLERR | EPOLLHUP)) {
-        close_and_free_client(epfd, client);
+        client_close_and_free(epfd, client);
         continue;
       }
       if (events & (EPOLLIN | EPOLLRDHUP)) {
-        handle_client_read(epfd, client);
+        client_handle_read(epfd, client);
       }
       if (events & EPOLLOUT) {
-        handle_client_write(epfd, client);
+        client_handle_write(epfd, client);
       }
     }
   }

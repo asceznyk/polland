@@ -7,29 +7,41 @@
 #include <errno.h>
 
 #include "defs.h"
+#include "buffer.h"
+
+enum body_kind {
+  BODY_NONE,
+  BODY_BUFFER,
+  BODY_FILE
+};
 
 struct client_state {
   int fd;
-  size_t in_len;
-  size_t in_pos;
-  char in_buf[BUFFER_SIZE];
-  size_t out_len;
-  size_t out_sent;
-  char *out_buf;
+  bool in_has_body;
+  struct buffer in_headers;
+  struct buffer in_body;
+  struct buffer out_headers;
+  size_t out_headers_sent;
+  struct buffer out_body;
+  size_t out_body_sent;
+  enum body_kind out_body_kind;
   enum {
-    STATE_READING,
-    STATE_WRITING,
-    STATE_CLOSING
+    STATE_READING_HEADERS,
+    STATE_READING_BODY,
+    STATE_WRITING_HEADERS,
+    STATE_WRITING_BODY,
+    STATE_CLOSING,
+    STATE_IDLE
   } state;
 };
 
-void add_client_conn(int epfd, int server_fd);
+void client_accept_conn(int epfd, int server_fd);
 
-void close_and_free_client(int epfd, struct client_state *client);
+void client_close_and_free(int epfd, struct client_state *client);
 
-void handle_client_read(int epfd, struct client_state *client);
+void client_handle_read(int epfd, struct client_state *client);
 
-void handle_client_write(int epfd, struct client_state *client);
+void client_handle_write(int epfd, struct client_state *client);
 
 #endif
 

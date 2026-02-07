@@ -6,6 +6,7 @@
 #define NUM_BACKLOG 10
 #define MAX_EVENTS 64
 
+#define STATIC_PREFIX "/static"
 #define STATIC_LOCATION "/var/www/html"
 
 #define PROXY_PASS ""

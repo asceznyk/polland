@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "utils.h"
+#include "client.h"
 
 char *skip_leading_ws(char *buffer) {
   while(*buffer && isspace((unsigned char)*buffer)) buffer++;
@@ -33,10 +34,8 @@ void print_escaped(const char *buf, ssize_t n) {
     if (c == '\r') printf("\\r");
     else if (c == '\n') printf("\\n");
     else if (c == '\t') printf("\\t");
-    else if (c < 32 || c > 126)
-      printf("\\x%02X", c);
-    else
-      printf("%c", c);
+    else if (c < 32 || c > 126) printf("\\x%02X", c);
+    else printf("%c", c);
   }
   printf("\n");
 }
@@ -49,6 +48,17 @@ char *str_concat(char *a, char *b) {
   memcpy(res + len_a, b, len_b);
   res[len_a + len_b] = '\0';
   return res;
+}
+
+void print_client_io_buffers(struct client_state *client) {
+  struct buffer *in_headers = &client->in_headers;
+  struct buffer *in_body = &client->in_body;
+  printf("in_headers = "); print_escaped(in_headers->data, in_headers->len);
+  printf("in_body = "); print_escaped(in_body->data, in_body->len);
+  struct buffer *out_headers = &client->out_headers;
+  struct buffer *out_body = &client->out_body;
+  printf("out_headers = "); print_escaped(out_headers->data, out_headers->len);
+  printf("out_body = "); print_escaped(out_body->data, out_body->len);
 }
 
 

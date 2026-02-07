@@ -27,11 +27,11 @@ void* client_thread(void *arg) {
   }
   printf("[client %d] connected\n", id);
   send_chunk(sock, "GE");
-  send_chunk(sock, "T / HT");
+  send_chunk(sock, "T /static/index.html HT");
   send_chunk(sock, "TP/1.1\r\n");
   send_chunk(sock, "Host: local");
   send_chunk(sock, "host:6969\r\n");
-  send_chunk(sock, "User-Agent: mc\r\n");
+  send_chunk(sock, "User-Agent: mock\r\n");
   send_chunk(sock, "\r\n");
   char buf[2048];
   int n = recv(sock, buf, sizeof(buf)-1, 0);

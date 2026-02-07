@@ -9,51 +9,50 @@
 #include "utils.h"
 #include "http.h"
 
-char *not_found =
+char *not_found_header =
   "HTTP/1.1 404 Not Found\r\n"
   "Content-Type: text/html\r\n"
   "Content-Length: 68\r\n"
   "Connection: close\r\n"
-  "\r\n"
+  "\r\n";
+
+char *not_found_body =
   "<html><body><h1>404 Not Found</h1><p>The page is missing.</p></body></html>";
 
-void fill_client_not_found(struct client_state *client) {
-  size_t n = strlen(not_found);
-  client->out_buf = malloc(n);
-  client->out_len = n;
-  memcpy(client->out_buf, not_found, n);
+char *not_implemented_header =
+  "HTTP/1.1 501 Not Implemented\r\n"
+  "Content-Type: text/html\r\n"
+  "Content-Length: 90\r\n"
+  "Connection: close\r\n"
+  "\r\n";
+
+char *not_implemented_body =
+  "<html><body><h1>501 Not Implemented</h1><p>This method is not supported.</p></body></html>";
+
+enum http_method http_parse_method(char *data, size_t hdr_end) {
+  if (hdr_end >= 3 && !memcmp(data, "GET", 3)) return M_GET;
+  if (hdr_end >= 4 && !memcmp(data, "HEAD", 4)) return M_HEAD;
+  if (hdr_end >= 4 && !memcmp(data, "POST", 4)) return M_POST;
+  if (hdr_end >= 3 && !memcmp(data, "PUT", 3)) return M_PUT;
+  if (hdr_end >= 6 && !memcmp(data, "DELETE", 6)) return M_DELETE;
+  return M_UNKNOWN;
 }
 
-char *get_http_method(char *buffer) {
-  char *end = skip_leading_ws(buffer);
-  while (*end && *end != ' ') end++;
-  size_t len = end - buffer;
-  char *method = malloc(len + 1);
-  if(!method) return NULL;
-  memcpy(method, buffer, len);
-  method[len] = '\0';
-  return method;
+char *http_parse_url(char *data) {
+  char *method = strtok(data, " \t");
+  char *url = strtok(NULL, " \t");
+  char *ver = strtok(NULL, " \t");
+  if (!method || !url || !ver) return NULL;
+  return url;
 }
 
-char *get_file_path_url(char *buffer, char *method) {
-  char *start = skip_leading_ws(buffer);
-  start += strlen(method)+1;
-  char *end = start;
-  while(*end && *end != ' ') end++;
-  size_t len = end - start;
-  char *loc = malloc(len + 1);
-  memcpy(loc, start, len);
-  loc[len] = '\0';
-  return loc;
-}
-
-char *get_file_extension(char *loc) {
+char *http_get_file_extension(char *loc) {
   char *dot = strrchr(loc, '.');
   if(!dot || dot == loc) return "";
   return dot + 1;
 }
 
-const char *get_mime_type(const char *ext) {
+const char *http_get_mime_type(const char *ext) {
   if (!strcasecmp(ext, "html") || !strcasecmp(ext, "htm")) {
     return "text/html";
   } else if (!strcasecmp(ext, "jpeg") || !strcasecmp(ext, "jpg")) {
@@ -67,31 +66,55 @@ const char *get_mime_type(const char *ext) {
   }
 }
 
-int static_resolve_path(char *path) {
-  char *loc = str_concat(STATIC_LOCATION, path);
+char *http_resolve_static_path(const char *url) {
+  const char *prefix = STATIC_PREFIX;
+  const char *root = STATIC_LOCATION;
+  const char *index = "/index.html";
+  size_t ulen = strlen(url);
+  size_t plen = strlen(prefix);
+  if (strncmp(url, prefix, plen) != 0) return NULL;
+  if (ulen == plen || (ulen == plen + 1 && url[plen] == '/')) {
+    size_t len = strlen(root) + strlen(index) + 1;
+    char *out = malloc(len);
+    if (!out) return NULL;
+    strcpy(out, root);
+    strcat(out, index);
+    return out;
+  }
+  if (url[plen] == '/') {
+    const char *rest = url + plen;
+    size_t len = strlen(root) + strlen(rest) + 1;
+    char *out = malloc(len);
+    if (!out) return NULL;
+    strcpy(out, root);
+    strcat(out, rest);
+    return out;
+  }
+  return NULL;
+}
+
+int http_open_static_path(char *url) {
+  char *loc = http_resolve_static_path(url);
   struct stat st;
   if (stat(loc, &st) == 0 && S_ISDIR(st.st_mode)) {
     free(loc);
-    return static_resolve_path("/index.html");
+    return -1;
   }
   int fd = open(loc, O_RDONLY);
   free(loc);
   return fd;
 }
 
-void put_http_response(
-  struct client_state *client, char *rpath, int file_fd
+void http_build_static_response(
+  struct client_state *client, char *url, int file_fd, bool is_head
 ) {
-  if (file_fd == -1) {
-    fill_client_not_found(client);
-    return;
-  }
   const char *mime_type = NULL;
-  if(strcmp(rpath, "/") == 0) {
-    mime_type = get_mime_type("html");
+  printf("url = %s\n", url);
+  if(strcmp(url, STATIC_PREFIX) == 0 || strcmp(url, STATIC_PREFIX "/") == 0) {
+    mime_type = http_get_mime_type("html");
   } else {
-    char *ext = get_file_extension(rpath);
-    mime_type = get_mime_type(ext);
+    char *ext = http_get_file_extension(url);
+    mime_type = http_get_mime_type(ext);
   }
   struct stat f_stat;
   fstat(file_fd, &f_stat);
@@ -108,33 +131,64 @@ void put_http_response(
   );
   ssize_t n;
   char tmp_buf[BUFFER_SIZE];
-  client->out_buf = malloc((size_t)header_len+content_len);
-  client->out_len = 0;
-  client->out_sent = 0;
-  memcpy(client->out_buf, header, (size_t)header_len);
-  client->out_len += (size_t)header_len;
+  struct buffer *out_headers =&client->out_headers;
+  struct buffer *out_body = &client->out_body;
+  out_headers->data = malloc((size_t)header_len);
+  memcpy(out_headers->data, header, (size_t)header_len);
+  out_headers->len = header_len;
+  out_headers->cap = header_len;
+  if (is_head) {
+    close(file_fd);
+    return;
+  }
+  out_body->data = malloc((size_t)content_len);
   while((n = read(file_fd, tmp_buf, sizeof(tmp_buf))) > 0) {
-    memcpy(client->out_buf+client->out_len, tmp_buf, n);
-    client->out_len += n;
+    memcpy(out_body->data + out_body->len, tmp_buf, n);
+    out_body->len += n;
+    out_body->cap += n;
   };
   close(file_fd);
 }
 
-void build_http_response(struct client_state *client) {
-  if (client->in_len <= 0) return;
-  int client_fd = client->fd;
-  char *method = get_http_method(client->in_buf);
-  if (strcmp(method, "GET") != 0) return;
-  if (!strcmp(STATIC_LOCATION, "")) {
-    fill_client_not_found(client);
-    free(method);
+void http_fill_buffer_error(struct buffer *buf, const char *fail_buf) {
+  size_t n = strlen(fail_buf);
+  char *data = malloc(n);
+  if (!data) return;
+  free(buf->data);
+  buf->data = data;
+  buf->cap = n;
+  buf->len = n;
+  memcpy(buf->data, fail_buf, n);
+}
+
+void http_fill_response_get(struct client_state *client, bool is_head)  {
+  struct buffer *in_headers = &client->in_headers;
+  char *url = http_parse_url(in_headers->data);
+  if (strncmp(url, STATIC_PREFIX, strlen(STATIC_PREFIX)) == 0) {
+    int file_fd = http_open_static_path(url);
+    printf("http_fill_response_get, file_fd = %d\n", file_fd);
+    if (file_fd == -1) {
+      http_fill_buffer_error(&client->out_headers, not_found_header);
+      if (is_head) return;
+      http_fill_buffer_error(&client->out_body, not_found_body);
+      return;
+    }
+    http_build_static_response(client, url, file_fd, is_head);
     return;
   }
-  char *path = get_file_path_url(client->in_buf, method);
-  int file_fd = static_resolve_path(path);
-  put_http_response(client, path, file_fd);
-  free(path);
-  free(method);
+  http_fill_buffer_error(&client->out_headers, not_implemented_header);
+  if (is_head) return;
+  http_fill_buffer_error(&client->out_body, not_implemented_body);
+  return;
 }
+
+void http_build_out_response(struct client_state *client, size_t hdr_end) {
+  struct buffer *in_headers = &client->in_headers;
+  enum http_method method = http_parse_method(in_headers->data, hdr_end);
+  if (method == M_HEAD || method == M_GET) {
+    http_fill_response_get(client, (method == M_HEAD));
+  }
+}
+
 
 
