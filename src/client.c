@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/sendfile.h>
 
 #include "defs.h"
 #include "utils.h"
@@ -20,6 +21,7 @@ bool client_init(struct client_state *client, int fd) {
     .fd = fd,
     .state = STATE_READING_HEADERS,
     .in_has_body = false,
+    .out_file_offset = 0,
   };
   if (!buffer_init(&client->in_headers, BUFFER_SIZE)) goto fail;
   if (!buffer_init(&client->in_body, BUFFER_SIZE)) goto fail;
@@ -179,7 +181,7 @@ void client_handle_read(int epfd, struct client_state *client) {
   }
 }
 
-static int client_send_buffer(
+static int client_send_flat_buffer(
   int fd, struct buffer *buf, size_t *sent
 ) {
   while (*sent < buf->len) {
@@ -197,58 +199,98 @@ static int client_send_buffer(
   return 1;
 }
 
-void client_reset_out_buffers(struct client_state *client) {
-  printf("client_reset_out_buffers fd = %d\n", client->fd);
-  struct buffer *out_headers = &client->out_headers;
-  struct buffer *out_body = &client->out_body;
-  printf("out_headers free!\n");
-  free(out_headers->data);
-  out_headers->data = NULL;
-  out_headers->len = 0;
-  out_headers->cap = 0;
-  printf("out_body free!\n");
-  free(out_body->data);
-  out_body->data = NULL;
-  out_body->len = 0;
-  out_body->cap = 0;
+static int client_send_file(
+  int sock_fd,
+  int file_fd,
+  off_t *offset,
+  size_t file_size
+) {
+  while (*offset < (off_t)file_size) {
+    size_t remaining = file_size - *offset;
+    size_t to_send = remaining < BUFFER_SIZE ? remaining : BUFFER_SIZE;
+    ssize_t n = sendfile(sock_fd, file_fd, offset, to_send);
+    if (n > 0) continue;
+    if (n == 0) {
+      if (*offset >= (off_t)file_size)
+        break;
+      return -1;
+    }
+    if (errno == EINTR) continue;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+    return -1;
+  }
+  return 1;
+}
+
+void client_reset_out_headers(struct client_state *client) {
+  client->out_headers_sent = 0;
+  client->out_headers.len = 0;
+}
+
+void client_reset_out_body_or_file(struct client_state *client) {
+  switch (client->out_body_kind) {
+    case BODY_FILE:
+      if (client->out_file_fd != -1) close(client->out_file_fd);
+      client->out_file_fd = -1;
+      client->out_file_size = 0;
+      client->out_file_offset = 0;
+      client->out_body_kind = BODY_NONE;
+      break;
+    case BODY_BUFFER:
+      client->out_body_sent = 0;
+      client->out_body.len = 0;
+      client->out_body_kind = BODY_NONE;
+      break;
+    case BODY_NONE:
+    default:
+      break;
+  }
 }
 
 void client_handle_write(int epfd, struct client_state *client) {
   for (;;) {
     int rc;
     if (client->state == STATE_WRITING_HEADERS) {
-      rc = client_send_buffer(
+      rc = client_send_flat_buffer(
         client->fd,
         &client->out_headers,
         &client->out_headers_sent
       );
       if (rc < 0) goto fail;
       if (rc == 0) return; // EAGAIN → wait for EPOLLOUT
-      client->out_headers_sent = 0;
+      client_reset_out_headers(client);
       client_http_adv_state(client); // → WRITING_BODY
       continue;
     }
     if (client->state == STATE_WRITING_BODY) {
-      rc = client_send_buffer(
-        client->fd,
-        &client->out_body,
-        &client->out_body_sent
-      );
+      printf("client->out_body_kind == %d\n", client->out_body_kind);
+      if (client->out_body_kind == BODY_FILE) {
+        rc = client_send_file(
+          client->fd,
+          client->out_file_fd,
+          &client->out_file_offset,
+          client->out_file_size
+        );
+      } else {
+        rc = client_send_flat_buffer(
+          client->fd,
+          &client->out_body,
+          &client->out_body_sent
+        );
+      }
       if (rc < 0) goto fail;
       if (rc == 0) return; // EAGAIN → wait
-      client->out_body_sent = 0;
+      client_reset_out_body_or_file(client);
       client_http_adv_state(client); // → READING_HEADERS
       continue;
     }
     if (client->state == STATE_READING_HEADERS) {
-      client_reset_out_buffers(client);
       client_epoll_switch_state(epfd, client, 0);
       return;
     }
     return;
   }
 fail:
-  client_reset_out_buffers(client);
   client_close_and_free(epfd, client);
 }
 

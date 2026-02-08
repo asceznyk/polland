@@ -57,6 +57,7 @@ void print_client_io_buffers(struct client_state *client) {
   printf("in_body = "); print_escaped(in_body->data, in_body->len);
   struct buffer *out_headers = &client->out_headers;
   struct buffer *out_body = &client->out_body;
+  printf("out_headers->len = %ld\n", out_headers->len);
   printf("out_headers = "); print_escaped(out_headers->data, out_headers->len);
   printf("out_body = "); print_escaped(out_body->data, out_body->len);
 }

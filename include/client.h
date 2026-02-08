@@ -23,8 +23,11 @@ struct client_state {
   struct buffer out_headers;
   size_t out_headers_sent;
   struct buffer out_body;
-  size_t out_body_sent;
   enum body_kind out_body_kind;
+  size_t out_body_sent;
+  int out_file_fd;
+  size_t out_file_size;
+  off_t out_file_offset;
   enum {
     STATE_READING_HEADERS,
     STATE_READING_BODY,

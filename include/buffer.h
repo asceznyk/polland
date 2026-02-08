@@ -11,8 +11,11 @@ struct buffer {
 };
 
 bool buffer_init(struct buffer *buf, size_t cap);
+
 void buffer_free(struct buffer *buf);
+
 void buffer_consume(struct buffer *buf, size_t n);
-void buffer_append(struct buffer *buf, const void *src, size_t n);
+
+int buffer_append(struct buffer *buf, const void *src, size_t n);
 
 #endif

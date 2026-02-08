@@ -129,10 +129,7 @@ void http_build_static_response(
       "\r\n",
     mime_type, (size_t)content_len
   );
-  ssize_t n;
-  char tmp_buf[BUFFER_SIZE];
-  struct buffer *out_headers =&client->out_headers;
-  struct buffer *out_body = &client->out_body;
+  struct buffer *out_headers = &client->out_headers;
   out_headers->data = malloc((size_t)header_len);
   memcpy(out_headers->data, header, (size_t)header_len);
   out_headers->len = header_len;
@@ -141,13 +138,9 @@ void http_build_static_response(
     close(file_fd);
     return;
   }
-  out_body->data = malloc((size_t)content_len);
-  while((n = read(file_fd, tmp_buf, sizeof(tmp_buf))) > 0) {
-    memcpy(out_body->data + out_body->len, tmp_buf, n);
-    out_body->len += n;
-    out_body->cap += n;
-  };
-  close(file_fd);
+  client->out_body_kind = BODY_FILE;
+  client->out_file_fd = file_fd;
+  client->out_file_size = (size_t)content_len;
 }
 
 void http_fill_buffer_error(struct buffer *buf, const char *fail_buf) {
