@@ -51,7 +51,7 @@ int main() {
     exit(EXIT_FAILURE);
   }
   printf("server is listening on PORT %d\n", PORT);
-  printf("static dir = %s\n", STATIC_LOCATION);
+  printf("static dir = %s\n", STATIC_ROOT);
   int epfd = epoll_create1(0);
   struct epoll_event evt = {
     .events = EPOLLIN,

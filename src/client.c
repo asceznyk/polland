@@ -207,7 +207,7 @@ static int client_send_file(
 ) {
   while (*offset < (off_t)file_size) {
     size_t remaining = file_size - *offset;
-    size_t to_send = remaining < BUFFER_SIZE ? remaining : BUFFER_SIZE;
+    size_t to_send = remaining < FILE_CHUNK_SIZE ? remaining : FILE_CHUNK_SIZE;
     ssize_t n = sendfile(sock_fd, file_fd, offset, to_send);
     if (n > 0) continue;
     if (n == 0) {

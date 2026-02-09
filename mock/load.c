@@ -13,7 +13,7 @@ void send_chunk(int sock, const char *chunk) {
   usleep(CHUNK_DELAY_US);
 }
 
-void* client_thread(void *arg) {
+void *client_thread(void *arg) {
   int id = (intptr_t)arg;
   int sock = socket(AF_INET, SOCK_STREAM, 0);
   struct sockaddr_in server_addr = {

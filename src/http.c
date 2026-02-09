@@ -23,7 +23,7 @@ char *not_implemented_header =
   "HTTP/1.1 501 Not Implemented\r\n"
   "Content-Type: text/html\r\n"
   "Content-Length: 90\r\n"
-  "Connection: close\r\n"
+  "Connection: keep-alive\r\n"
   "\r\n";
 
 char *not_implemented_body =
@@ -68,7 +68,7 @@ const char *http_get_mime_type(const char *ext) {
 
 char *http_resolve_static_path(const char *url) {
   const char *prefix = STATIC_PREFIX;
-  const char *root = STATIC_LOCATION;
+  const char *root = STATIC_ROOT;
   const char *index = "/index.html";
   size_t ulen = strlen(url);
   size_t plen = strlen(prefix);
@@ -143,15 +143,26 @@ void http_build_static_response(
   client->out_file_size = (size_t)content_len;
 }
 
-void http_fill_buffer_error(struct buffer *buf, const char *fail_buf) {
-  size_t n = strlen(fail_buf);
+void http_fill_buffer(struct buffer *buf, const char *fill_buf) {
+  size_t n = strlen(fill_buf);
   char *data = malloc(n);
   if (!data) return;
   free(buf->data);
   buf->data = data;
   buf->cap = n;
   buf->len = n;
-  memcpy(buf->data, fail_buf, n);
+  memcpy(buf->data, fill_buf, n);
+}
+
+void http_build_err_response(
+  struct client_state *client,
+  const char *err_header,
+  const char *err_body,
+  bool is_head
+) {
+  http_fill_buffer(&client->out_headers, err_header);
+  if (is_head) return;
+  http_fill_buffer(&client->out_body, err_body);
 }
 
 void http_fill_response_get(struct client_state *client, bool is_head)  {
@@ -161,17 +172,19 @@ void http_fill_response_get(struct client_state *client, bool is_head)  {
     int file_fd = http_open_static_path(url);
     printf("http_fill_response_get, file_fd = %d\n", file_fd);
     if (file_fd == -1) {
-      http_fill_buffer_error(&client->out_headers, not_found_header);
-      if (is_head) return;
-      http_fill_buffer_error(&client->out_body, not_found_body);
+      http_build_err_response(
+        client, not_found_header, not_found_body, is_head
+      );
       return;
     }
     http_build_static_response(client, url, file_fd, is_head);
     return;
-  }
-  http_fill_buffer_error(&client->out_headers, not_implemented_header);
-  if (is_head) return;
-  http_fill_buffer_error(&client->out_body, not_implemented_body);
+  } /*else {
+    //deal with proxy request(s)
+  }*/
+  http_build_err_response(
+    client, not_implemented_header, not_implemented_body, is_head
+  );
   return;
 }
 
