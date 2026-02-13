@@ -4,8 +4,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "defs.h"
-#include "client.h"
 #include "utils.h"
 #include "http.h"
 
@@ -19,6 +17,19 @@ char *not_found_header =
 char *not_found_body =
   "<html><body><h1>404 Not Found</h1><p>The page is missing.</p></body></html>";
 
+char *method_not_allowed_header =
+  "HTTP/1.1 405 Method Not Allowed\r\n"
+  "Content-Type: text/html\r\n"
+  "Content-Length: 123\r\n"
+  "Allow: GET, HEAD\r\n"
+  "Connection: keep-alive\r\n"
+  "\r\n";
+
+char *method_not_allowed_body =
+  "<html><body><h1>405 Method Not Allowed</h1>"
+  "<p>The requested HTTP method is not supported for this resource.</p>"
+  "</body></html>";
+
 char *not_implemented_header =
   "HTTP/1.1 501 Not Implemented\r\n"
   "Content-Type: text/html\r\n"
@@ -28,6 +39,16 @@ char *not_implemented_header =
 
 char *not_implemented_body =
   "<html><body><h1>501 Not Implemented</h1><p>This method is not supported.</p></body></html>";
+
+char *bad_gateway_header =
+  "HTTP/1.1 502 Bad Gateway\r\n"
+  "Content-Type: text/html\r\n"
+  "Content-Length: 106\r\n"
+  "Connection: keep-alive\r\n"
+  "\r\n";
+
+char *bad_gateway_body =
+  "<html><body><h1>502 Bad Gateway</h1><p>The upstream server returned an invalid response.</p></body></html>";
 
 enum http_method http_parse_method(char *data, size_t hdr_end) {
   if (hdr_end >= 3 && !memcmp(data, "GET", 3)) return M_GET;
@@ -154,7 +175,7 @@ void http_fill_buffer(struct buffer *buf, const char *fill_buf) {
   memcpy(buf->data, fill_buf, n);
 }
 
-void http_build_err_response(
+void http_build_err_resp(
   struct client_state *client,
   const char *err_header,
   const char *err_body,
@@ -165,36 +186,64 @@ void http_build_err_response(
   http_fill_buffer(&client->out_body, err_body);
 }
 
-void http_fill_response_get(struct client_state *client, bool is_head)  {
-  struct buffer *in_headers = &client->in_headers;
-  char *url = http_parse_url(in_headers->data);
-  if (strncmp(url, STATIC_PREFIX, strlen(STATIC_PREFIX)) == 0) {
-    int file_fd = http_open_static_path(url);
-    printf("http_fill_response_get, file_fd = %d\n", file_fd);
-    if (file_fd == -1) {
-      http_build_err_response(
-        client, not_found_header, not_found_body, is_head
+void http_fill_static_resp_get(
+  struct client_state *client, char *url, bool is_head
+) {
+  client->out_body_kind = is_head ? BODY_NONE : BODY_BUFFER;
+  int file_fd = http_open_static_path(url);
+  if (file_fd == -1) {
+    http_build_err_resp(
+      client, not_found_header, not_found_body, is_head
+    );
+    return;
+  }
+  http_build_static_response(client, url, file_fd, is_head);
+  /*if (strcmp(PROXY_HOST, "") != 0) {
+    client->in_url_is_static = false;
+    if (!has_backend) {
+      http_build_err_resp(
+        client, bad_gateway_header, bad_gateway_body, is_head
       );
       return;
     }
-    http_build_static_response(client, url, file_fd, is_head);
-    return;
-  } /*else {
-    //deal with proxy request(s)
   }*/
-  http_build_err_response(
-    client, not_implemented_header, not_implemented_body, is_head
-  );
-  return;
 }
 
-void http_build_out_response(struct client_state *client, size_t hdr_end) {
+void http_build_static_out(
+  struct client_state *client, size_t hdr_end, char *url
+) {
   struct buffer *in_headers = &client->in_headers;
   enum http_method method = http_parse_method(in_headers->data, hdr_end);
   if (method == M_HEAD || method == M_GET) {
-    http_fill_response_get(client, (method == M_HEAD));
+    http_fill_static_resp_get(client, url, (method == M_HEAD));
+    return;
   }
+  http_build_err_resp(
+    client, method_not_allowed_header, method_not_allowed_body, false
+  );
 }
 
+void http_build_out_resp(struct client_state *client, size_t hdr_end) {
+  struct buffer *in_headers = &client->in_headers;
+  char tmp[BUFFER_SIZE];
+  memcpy(tmp, in_headers->data, in_headers->len);
+  tmp[in_headers->len] = '\0';
+  char *url = http_parse_url(tmp);
+  if (strncmp(url, STATIC_PREFIX, strlen(STATIC_PREFIX)) == 0) {
+    client->in_url_is_static = true;
+    http_build_static_out(client, hdr_end, url);
+    return;
+  } else if (strcmp(PROXY_HOST, "") != 0) {
+    client->in_url_is_static = false;
+    http_build_err_resp(
+      client, not_implemented_header, not_implemented_body, false
+    ); //for now
+    //init proxy
+    return;
+  }
+  http_build_err_resp(
+    client, not_implemented_header, not_implemented_body, false
+  );
+}
 
 

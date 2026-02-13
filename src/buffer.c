@@ -1,6 +1,3 @@
-#include <stdlib.h>
-#include <string.h>
-
 #include "buffer.h"
 
 bool buffer_init(struct buffer *buf, size_t cap) {
@@ -42,4 +39,44 @@ int buffer_append(struct buffer *buf, const void *src, size_t n) {
   return 0;
 }
 
+int buffer_send_flat(
+  int fd, struct buffer *buf, size_t *sent
+) {
+  while (*sent < buf->len) {
+    size_t remaining = buf->len - *sent;
+    size_t to_send = remaining < BUFFER_SIZE ? remaining : BUFFER_SIZE;
+    ssize_t n = send(fd, buf->data + *sent, to_send, 0);
+    if (n > 0) {
+      *sent += n;
+      continue;
+    }
+    if (n == 0) return -1;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+    return -1;
+  }
+  return 1;
+}
+
+int buffer_send_file(
+  int sock_fd,
+  int file_fd,
+  off_t *offset,
+  size_t file_size
+) {
+  while (*offset < (off_t)file_size) {
+    size_t remaining = file_size - *offset;
+    size_t to_send = remaining < FILE_CHUNK_SIZE ? remaining : FILE_CHUNK_SIZE;
+    ssize_t n = sendfile(sock_fd, file_fd, offset, to_send);
+    if (n > 0) continue;
+    if (n == 0) {
+      if (*offset >= (off_t)file_size)
+        break;
+      return -1;
+    }
+    if (errno == EINTR) continue;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+    return -1;
+  }
+  return 1;
+}
 

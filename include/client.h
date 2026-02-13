@@ -5,9 +5,17 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/epoll.h>
+#include <sys/sendfile.h>
 
 #include "defs.h"
 #include "buffer.h"
+#include "backend.h"
+#include "fd_ctx.h"
 
 enum body_kind {
   BODY_NONE,
@@ -18,23 +26,27 @@ enum body_kind {
 struct client_state {
   int fd;
   bool in_has_body;
+  bool in_url_is_static;
   struct buffer in_headers;
   struct buffer in_body;
   struct buffer out_headers;
   size_t out_headers_sent;
   struct buffer out_body;
-  enum body_kind out_body_kind;
   size_t out_body_sent;
+  enum body_kind out_body_kind;
   int out_file_fd;
   size_t out_file_size;
   off_t out_file_offset;
+  struct backend_state backend;
+  struct fd_ctx client_ctx;
+  struct fd_ctx backend_ctx;
   enum {
-    STATE_READING_HEADERS,
-    STATE_READING_BODY,
-    STATE_WRITING_HEADERS,
-    STATE_WRITING_BODY,
-    STATE_CLOSING,
-    STATE_IDLE
+    CLIENT_READING_HEADERS,
+    CLIENT_READING_BODY,
+    CLIENT_WRITING_HEADERS,
+    CLIENT_WRITING_BODY,
+    CLIENT_CLOSING,
+    CLIENT_IDLE
   } state;
 };
 

@@ -69,16 +69,18 @@ int main() {
         client_accept_conn(epfd, server_fd);
         continue;
       }
-      struct client_state *client = sevents[i].data.ptr;
+      struct fd_ctx *ctx = sevents[i].data.ptr;
+      struct client_state *client = ctx->client;
       if (events & (EPOLLERR | EPOLLHUP)) {
         client_close_and_free(epfd, client);
         continue;
       }
-      if (events & (EPOLLIN | EPOLLRDHUP)) {
-        client_handle_read(epfd, client);
-      }
-      if (events & EPOLLOUT) {
-        client_handle_write(epfd, client);
+      if (ctx->kind == FD_CLIENT) {
+        if (events & (EPOLLIN | EPOLLRDHUP)) client_handle_read(epfd, client);
+        if (events & EPOLLOUT) client_handle_write(epfd, client);
+      } else if (ctx->kind == FD_BACKEND) {
+        //if (events & (EPOLLIN | EPOLLHUP)) backend_handle_read(epfd, client);
+        //if (events & EPOLLOUT) backend_handle_write(epfd, client);
       }
     }
   }

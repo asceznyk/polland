@@ -6,7 +6,7 @@
 #include <arpa/inet.h>
 
 #define CHUNK_DELAY_US 200000
-#define NUM_CLIENTS 20
+#define NUM_CLIENTS 3
 
 void send_chunk(int sock, const char *chunk) {
   send(sock, chunk, strlen(chunk), 0);
@@ -26,14 +26,16 @@ void *client_thread(void *arg) {
     return NULL;
   }
   printf("[client %d] connected\n", id);
-  send_chunk(sock, "GE");
-  send_chunk(sock, "T /static/index.html HT");
+  send_chunk(sock, "GET /static/index.html HT");
   send_chunk(sock, "TP/1.1\r\n");
   send_chunk(sock, "Host: local");
   send_chunk(sock, "host:6969\r\n");
   send_chunk(sock, "User-Agent: mock\r\n");
-  send_chunk(sock, "\r\n");
-  char buf[2048];
+  send_chunk(sock, "\r\nGET /static/index.html HTTP/1.1\r\n");
+  send_chunk(sock, "Host: local");
+  send_chunk(sock, "host:6969\r\n");
+  send_chunk(sock, "User-Agent: mock\r\n\r\n");
+  char buf[4096];
   int n = recv(sock, buf, sizeof(buf)-1, 0);
   if (n > 0) {
     buf[n] = 0;

@@ -9,7 +9,7 @@ enum http_method http_parse_method(char *buf, size_t hdr_end);
 
 char *http_parse_url(char *buf);
 
-void http_build_out_response(struct client_state *client, size_t hdr_end);
+void http_build_out_resp(struct client_state *client, size_t hdr_end);
 
 #endif
 

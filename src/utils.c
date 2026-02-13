@@ -50,14 +50,16 @@ char *str_concat(char *a, char *b) {
   return res;
 }
 
-void print_client_io_buffers(struct client_state *client) {
+void print_client_in_buffers(struct client_state *client) {
   struct buffer *in_headers = &client->in_headers;
   struct buffer *in_body = &client->in_body;
   printf("in_headers = "); print_escaped(in_headers->data, in_headers->len);
   printf("in_body = "); print_escaped(in_body->data, in_body->len);
+}
+
+void print_client_out_buffers(struct client_state *client) {
   struct buffer *out_headers = &client->out_headers;
   struct buffer *out_body = &client->out_body;
-  printf("out_headers->len = %ld\n", out_headers->len);
   printf("out_headers = "); print_escaped(out_headers->data, out_headers->len);
   printf("out_body = "); print_escaped(out_body->data, out_body->len);
 }
