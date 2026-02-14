@@ -8,8 +8,8 @@
 #define MAX_EVENTS 64
 #define STATIC_PREFIX "/static"
 #define STATIC_ROOT "/var/www/html"
-#define PROXY_HOST "127.0.0.1"
-#define PROXY_PORT 3000
+#define BE_HOST "127.0.0.1"
+#define BE_PORT 8000
 
 #endif
 

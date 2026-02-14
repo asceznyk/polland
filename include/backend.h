@@ -22,7 +22,8 @@ struct backend_state {
     BE_WRITING_BODY,
     BE_DONE
   } state;
-  size_t send_off;
+  size_t in_headers_sent;
+  size_t in_body_sent;
 };
 
 void backend_init(struct backend_state *backend);
@@ -32,5 +33,9 @@ void backend_close(int epfd, struct backend_state *backend);
 int backend_connect(struct backend_state *backend, const char *ip, uint16_t port);
 
 bool backend_epoll_register(int epfd, struct client_state *client);
+
+void backend_handle_err(int epfd, struct client_state *client);
+
+void backend_handle_write(int epfd, struct client_state *client);
 
 #endif

@@ -103,9 +103,8 @@ void client_http_adv_state(struct client_state *client) {
   }
 }
 
-void client_split_after_headers(
-  struct client_state *client, size_t hdr_end
-) {
+void client_split_after_headers(struct client_state *client, size_t hdr_end) {
+  printf("client_split_after_headers: reached!\n");
   struct buffer *headers = &client->in_headers;
   if (client->state != CLIENT_READING_BODY) {
     buffer_consume(headers, hdr_end);
@@ -132,20 +131,18 @@ struct buffer *client_current_in_buffer(struct client_state *client) {
 }
 
 bool client_backend_connect(int epfd, struct client_state *client) {
-  if (backend_connect(&client->backend, PROXY_HOST, PROXY_PORT) < 0) {
+  printf("client_backend_connect: reached!\n");
+  if (backend_connect(&client->backend, BE_HOST, BE_PORT) < 0) {
     backend_close(epfd, &client->backend);
     return false;
   }
-  //backend_epoll_register(epfd, client);
-  backend_close(epfd, &client->backend);
-  return true;
+  return backend_epoll_register(epfd, client);
 }
 
 void client_handle_read(int epfd, struct client_state *client) {
   struct buffer *buf = client_current_in_buffer(client);
-  if (!buf) {
-    return;
-  }
+  if (!buf) return;
+  printf("client_handle_read: buf->len = %ld\n", buf->len);
   for (;;) {
     ssize_t n = recv(
       client->fd,
@@ -169,17 +166,25 @@ void client_handle_read(int epfd, struct client_state *client) {
     buf->len += n;
     if (client->state == CLIENT_READING_HEADERS) {
       ssize_t hdr_end = find_double_crlf(buf->data, buf->len, 0);
-      if (hdr_end != -1) {
-        client_http_adv_state(client);
-        if (client->state == CLIENT_WRITING_HEADERS) {
-          print_client_in_buffers(client);
-          http_build_out_resp(client, hdr_end);
-          if (client->in_url_is_static) client_split_after_headers(client, hdr_end);
-          client->in_url_is_static = false;
-          print_client_out_buffers(client);
-          client_epoll_switch_state(epfd, client, 1);
-          return;
-        }
+      if (hdr_end == -1) continue;
+      client_http_adv_state(client);
+      if (client->state != CLIENT_WRITING_HEADERS) continue;
+      print_client_in_buffers(client);
+      http_build_out_resp(client, hdr_end);
+      print_client_out_buffers(client);
+      if (client->in_url_is_static) {
+        client_split_after_headers(client, hdr_end);
+        client_epoll_switch_state(epfd, client, 1);
+        client->in_url_is_static = false;
+        return;
+      }
+      if(!client_backend_connect(epfd, client)) {
+        http_build_err_resp(
+          client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
+        );
+        client_split_after_headers(client, hdr_end);
+        client_epoll_switch_state(epfd, client, 1);
+        return;
       }
     } /*else if (client->state == CLIENT_READING_BODY) {
       if (client->in_body.len >= client->content_length) {

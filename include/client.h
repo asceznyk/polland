@@ -54,6 +54,10 @@ void client_accept_conn(int epfd, int server_fd);
 
 void client_close_and_free(int epfd, struct client_state *client);
 
+void client_epoll_switch_state(
+  int epfd, struct client_state *client, bool add_write
+);
+
 void client_handle_read(int epfd, struct client_state *client);
 
 void client_handle_write(int epfd, struct client_state *client);

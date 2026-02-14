@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 
 #include "client.h"
+#include "backend.h"
 
 static atomic_bool running = 1;
 
@@ -51,7 +52,6 @@ int main() {
     exit(EXIT_FAILURE);
   }
   printf("server is listening on PORT %d\n", PORT);
-  printf("static dir = %s\n", STATIC_ROOT);
   int epfd = epoll_create1(0);
   struct epoll_event evt = {
     .events = EPOLLIN,
@@ -72,7 +72,13 @@ int main() {
       struct fd_ctx *ctx = sevents[i].data.ptr;
       struct client_state *client = ctx->client;
       if (events & (EPOLLERR | EPOLLHUP)) {
-        client_close_and_free(epfd, client);
+        printf("EPOLLERR | EPOLLHUP\n");
+        //int err = 0;
+        //socklen_t len = sizeof(err);
+        //getsockopt(ctx->fd, SOL_SOCKET, SO_ERROR, &err, &len);
+        //printf("Backend socket error: %s\n", strerror(err));
+        if (ctx->kind == FD_BACKEND) backend_handle_err(epfd, client);
+        else client_close_and_free(epfd, client);
         continue;
       }
       if (ctx->kind == FD_CLIENT) {
@@ -80,7 +86,7 @@ int main() {
         if (events & EPOLLOUT) client_handle_write(epfd, client);
       } else if (ctx->kind == FD_BACKEND) {
         //if (events & (EPOLLIN | EPOLLHUP)) backend_handle_read(epfd, client);
-        //if (events & EPOLLOUT) backend_handle_write(epfd, client);
+        if (events & EPOLLOUT) backend_handle_write(epfd, client);
       }
     }
   }

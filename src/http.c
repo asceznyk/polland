@@ -1,23 +1,17 @@
-#include <stdio.h>
-#include <string.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 #include "utils.h"
 #include "http.h"
 
-char *not_found_header =
+const char *NOT_FOUND_HEADER =
   "HTTP/1.1 404 Not Found\r\n"
   "Content-Type: text/html\r\n"
   "Content-Length: 68\r\n"
   "Connection: close\r\n"
   "\r\n";
 
-char *not_found_body =
+const char *NOT_FOUND_BODY =
   "<html><body><h1>404 Not Found</h1><p>The page is missing.</p></body></html>";
 
-char *method_not_allowed_header =
+const char *METHOD_NOT_ALLOWED_HEADER =
   "HTTP/1.1 405 Method Not Allowed\r\n"
   "Content-Type: text/html\r\n"
   "Content-Length: 123\r\n"
@@ -25,29 +19,29 @@ char *method_not_allowed_header =
   "Connection: keep-alive\r\n"
   "\r\n";
 
-char *method_not_allowed_body =
+const char *METHOD_NOT_ALLOWED_BODY =
   "<html><body><h1>405 Method Not Allowed</h1>"
   "<p>The requested HTTP method is not supported for this resource.</p>"
   "</body></html>";
 
-char *not_implemented_header =
+const char *NOT_IMPLEMENTED_HEADER =
   "HTTP/1.1 501 Not Implemented\r\n"
   "Content-Type: text/html\r\n"
   "Content-Length: 90\r\n"
   "Connection: keep-alive\r\n"
   "\r\n";
 
-char *not_implemented_body =
+const char *NOT_IMPLEMENTED_BODY =
   "<html><body><h1>501 Not Implemented</h1><p>This method is not supported.</p></body></html>";
 
-char *bad_gateway_header =
+const char *BAD_GATEWAY_HEADER =
   "HTTP/1.1 502 Bad Gateway\r\n"
   "Content-Type: text/html\r\n"
   "Content-Length: 106\r\n"
   "Connection: keep-alive\r\n"
   "\r\n";
 
-char *bad_gateway_body =
+const char *BAD_GATEWAY_BODY =
   "<html><body><h1>502 Bad Gateway</h1><p>The upstream server returned an invalid response.</p></body></html>";
 
 enum http_method http_parse_method(char *data, size_t hdr_end) {
@@ -193,20 +187,11 @@ void http_fill_static_resp_get(
   int file_fd = http_open_static_path(url);
   if (file_fd == -1) {
     http_build_err_resp(
-      client, not_found_header, not_found_body, is_head
+      client, NOT_FOUND_HEADER, NOT_FOUND_BODY, is_head
     );
     return;
   }
   http_build_static_response(client, url, file_fd, is_head);
-  /*if (strcmp(PROXY_HOST, "") != 0) {
-    client->in_url_is_static = false;
-    if (!has_backend) {
-      http_build_err_resp(
-        client, bad_gateway_header, bad_gateway_body, is_head
-      );
-      return;
-    }
-  }*/
 }
 
 void http_build_static_out(
@@ -219,7 +204,7 @@ void http_build_static_out(
     return;
   }
   http_build_err_resp(
-    client, method_not_allowed_header, method_not_allowed_body, false
+    client, METHOD_NOT_ALLOWED_HEADER, METHOD_NOT_ALLOWED_BODY, false
   );
 }
 
@@ -233,16 +218,12 @@ void http_build_out_resp(struct client_state *client, size_t hdr_end) {
     client->in_url_is_static = true;
     http_build_static_out(client, hdr_end, url);
     return;
-  } else if (strcmp(PROXY_HOST, "") != 0) {
+  } else if (strcmp(BE_HOST, "") != 0) {
     client->in_url_is_static = false;
-    http_build_err_resp(
-      client, not_implemented_header, not_implemented_body, false
-    ); //for now
-    //init proxy
     return;
   }
   http_build_err_resp(
-    client, not_implemented_header, not_implemented_body, false
+    client, NOT_IMPLEMENTED_HEADER, NOT_IMPLEMENTED_BODY, false
   );
 }
 
