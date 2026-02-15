@@ -1,6 +1,7 @@
 #ifndef CLIENT_H
 #define CLIENT_H
 
+#include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -27,7 +28,9 @@ struct client_state {
   int fd;
   bool in_has_body;
   bool in_url_is_static;
+  size_t in_header_end;
   struct buffer in_headers;
+  size_t in_body_end;
   struct buffer in_body;
   struct buffer out_headers;
   size_t out_headers_sent;

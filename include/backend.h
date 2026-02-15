@@ -36,6 +36,8 @@ bool backend_epoll_register(int epfd, struct client_state *client);
 
 void backend_handle_err(int epfd, struct client_state *client);
 
+void backend_handle_read(int epfd, struct client_state *client);
+
 void backend_handle_write(int epfd, struct client_state *client);
 
 #endif

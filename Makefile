@@ -1,5 +1,5 @@
 CC     := gcc
-CFLAGS := -Wall -Wextra -O2 -Iinclude -g -O0
+CFLAGS := -Wall -Wextra -O2 -Iinclude -g -O0 -fsanitize=address,undefined -fno-omit-frame-pointer
 
 SRC_DIR  := src
 TEST_DIR := tests

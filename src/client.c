@@ -14,6 +14,8 @@ bool client_init(struct client_state *client, int fd) {
     .fd = fd,
     .state = CLIENT_READING_HEADERS,
     .in_has_body = false,
+    .in_header_end = 0,
+    .in_body_end = 0,
     .out_file_offset = 0,
     .out_body_kind = BODY_BUFFER,
   };
@@ -66,7 +68,7 @@ void client_accept_conn(int epfd, int server_fd) {
 }
 
 void client_close_and_free(int epfd, struct client_state *client) {
-  printf("client_close_and_free, fd = %d\n", client->fd);
+  printf("client_close_and_free: client_fd = %d\n", client->fd);
   epoll_ctl(epfd, EPOLL_CTL_DEL, client->fd, NULL);
   close(client->fd);
   client_io_buffers_free(client);
@@ -143,14 +145,18 @@ void client_handle_read(int epfd, struct client_state *client) {
   struct buffer *buf = client_current_in_buffer(client);
   if (!buf) return;
   printf("client_handle_read: buf->len = %ld\n", buf->len);
+  printf("client_handle_read: client_fd = %d\n", client->fd);
   for (;;) {
+    assert(buf->len <= buf->cap);
     ssize_t n = recv(
       client->fd,
       buf->data + buf->len,
       buf->cap - buf->len,
       0
     );
+    if (buf->len > buf->cap) printf("error! buf->len = %ld buf->cap = %ld\n", buf->len, buf->cap);
     if (n == 0) {
+      printf("buf->len = %ld buf->cap = %ld\n", buf->len, buf->cap);
       printf("client connection closed on read! n == 0\n");
       client_close_and_free(epfd, client);
       return;
@@ -167,6 +173,7 @@ void client_handle_read(int epfd, struct client_state *client) {
     if (client->state == CLIENT_READING_HEADERS) {
       ssize_t hdr_end = find_double_crlf(buf->data, buf->len, 0);
       if (hdr_end == -1) continue;
+      client->in_header_end = (size_t)hdr_end;
       client_http_adv_state(client);
       if (client->state != CLIENT_WRITING_HEADERS) continue;
       print_client_in_buffers(client);

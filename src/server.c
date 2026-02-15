@@ -73,10 +73,6 @@ int main() {
       struct client_state *client = ctx->client;
       if (events & (EPOLLERR | EPOLLHUP)) {
         printf("EPOLLERR | EPOLLHUP\n");
-        //int err = 0;
-        //socklen_t len = sizeof(err);
-        //getsockopt(ctx->fd, SOL_SOCKET, SO_ERROR, &err, &len);
-        //printf("Backend socket error: %s\n", strerror(err));
         if (ctx->kind == FD_BACKEND) backend_handle_err(epfd, client);
         else client_close_and_free(epfd, client);
         continue;
@@ -85,7 +81,10 @@ int main() {
         if (events & (EPOLLIN | EPOLLRDHUP)) client_handle_read(epfd, client);
         if (events & EPOLLOUT) client_handle_write(epfd, client);
       } else if (ctx->kind == FD_BACKEND) {
-        //if (events & (EPOLLIN | EPOLLHUP)) backend_handle_read(epfd, client);
+        if (events & (EPOLLIN | EPOLLHUP)) {
+          printf("EPOLLIN | EPOLLHUP,  FD_BACKEND, reached here!!!\n");
+          backend_handle_read(epfd, client);
+        }
         if (events & EPOLLOUT) backend_handle_write(epfd, client);
       }
     }
