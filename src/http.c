@@ -16,7 +16,7 @@ const char *METHOD_NOT_ALLOWED_HEADER =
   "Content-Type: text/html\r\n"
   "Content-Length: 123\r\n"
   "Allow: GET, HEAD\r\n"
-  "Connection: keep-alive\r\n"
+  "Connection: close\r\n"
   "\r\n";
 
 const char *METHOD_NOT_ALLOWED_BODY =
@@ -38,7 +38,7 @@ const char *BAD_GATEWAY_HEADER =
   "HTTP/1.1 502 Bad Gateway\r\n"
   "Content-Type: text/html\r\n"
   "Content-Length: 106\r\n"
-  "Connection: keep-alive\r\n"
+  "Connection: close\r\n"
   "\r\n";
 
 const char *BAD_GATEWAY_BODY =

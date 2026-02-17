@@ -4,18 +4,45 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+#include <errno.h>
+#include <assert.h>
 
 #define CHUNK_DELAY_US 200000
-#define NUM_CLIENTS 3
+#define NUM_CLIENTS 100
+#define BUFFER_SIZE 8192 * 3
+#define EXPECTED_RESPONSES 3
 
 void send_chunk(int sock, const char *chunk) {
-  send(sock, chunk, strlen(chunk), 0);
+  ssize_t total = 0;
+  ssize_t len = strlen(chunk);
+  while (total < len) {
+    ssize_t n = send(sock, chunk + total, len - total, 0);
+    if (n <= 0) {
+      perror("send");
+      return;
+    }
+    total += n;
+  }
   usleep(CHUNK_DELAY_US);
+}
+
+int count_http_responses(const char *buf) {
+  int count = 0;
+  const char *p = buf;
+  while ((p = strstr(p, "HTTP/1.1 ")) != NULL) {
+    count++;
+    p += 9;
+  }
+  return count;
 }
 
 void *client_thread(void *arg) {
   int id = (intptr_t)arg;
   int sock = socket(AF_INET, SOCK_STREAM, 0);
+  if (sock < 0) {
+    perror("socket");
+    return NULL;
+  }
   struct sockaddr_in server_addr = {
     .sin_family = AF_INET,
     .sin_port = htons(6969),
@@ -23,22 +50,49 @@ void *client_thread(void *arg) {
   };
   if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
     perror("connect");
+    close(sock);
     return NULL;
   }
   printf("[client %d] connected\n", id);
-  send_chunk(sock, "GET / HT");
-  send_chunk(sock, "TP/1.1\r\n");
-  send_chunk(sock, "Host: local");
-  send_chunk(sock, "host:6969\r\n");
-  send_chunk(sock, "User-Agent: mock\r\n\r\n");
-  send_chunk(sock, "GET / HTTP/1.1\r\n");
-  send_chunk(sock, "Host: localhost:6969\r\n");
-  send_chunk(sock, "User-Agent: mock\r\n\r\n");
-  char buf[4096];
-  int n = recv(sock, buf, sizeof(buf)-1, 0);
-  if (n > 0) {
-    buf[n] = 0;
-    printf("[client %d] response:\n%s\n", id, buf);
+  for (int i = 0; i < 3; i++) {
+    send_chunk(sock, "GET / HTTP/1.1\r\n");
+    send_chunk(sock, "Host: localhost:6969\r\n");
+    if (i < 2)
+      send_chunk(sock, "Connection: keep-alive\r\n");
+    else
+      send_chunk(sock, "Connection: close\r\n");
+    send_chunk(sock, "User-Agent: mock\r\n\r\n");
+  }
+  char buffer[BUFFER_SIZE];
+  ssize_t total = 0;
+  ssize_t n;
+  int sresp = 0;
+  while ((n = recv(sock, buffer + total, sizeof(buffer) - total - 1, 0)) > 0) {
+    total += n;
+    sresp = count_http_responses(buffer);
+    printf("sresp = %d\n", sresp);
+    if (sresp >= EXPECTED_RESPONSES) break;
+    if (total >= BUFFER_SIZE - 1) {
+      fprintf(stderr, "[client %d] buffer overflow risk\n", id);
+      break;
+    }
+  }
+  if (n < 0)
+    perror("recv");
+  buffer[total] = 0;
+  int responses = count_http_responses(buffer);
+  printf("\n==============================\n");
+  printf("[client %d] FULL RESPONSE (%ld bytes):\n", id, total);
+  printf("%s\n", buffer);
+  printf("==============================\n");
+  printf("[client %d] received %d responses (expected %d)\n", id, responses, EXPECTED_RESPONSES);
+  if (responses != EXPECTED_RESPONSES) {
+    fprintf(
+      stderr,
+      "[client %d] ERROR: expected %d responses but got %d\n",
+      id, EXPECTED_RESPONSES, responses
+    );
+    abort();
   }
   close(sock);
   printf("[client %d] done\n", id);
@@ -47,12 +101,11 @@ void *client_thread(void *arg) {
 
 int main() {
   pthread_t threads[NUM_CLIENTS];
-  for (int i = 0; i < NUM_CLIENTS; i++) {
+  for (int i = 0; i < NUM_CLIENTS; i++)
     pthread_create(&threads[i], NULL, client_thread, (void *)(intptr_t)i);
-  }
-  for (int i = 0; i < NUM_CLIENTS; i++) {
+  for (int i = 0; i < NUM_CLIENTS; i++)
     pthread_join(threads[i], NULL);
-  }
+  printf("All clients completed successfully.\n");
   return 0;
 }
 

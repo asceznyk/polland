@@ -17,6 +17,14 @@ void handle_interrupt(int sig) {
   running = 0;
 }
 
+void handle_free_list(struct client_state *free_head) {
+  while (free_head) {
+    struct client_state *next = free_head->next_to_free;
+    free(free_head);
+    free_head = next;
+  }
+}
+
 int main() {
   signal(SIGINT, handle_interrupt);
   signal(SIGTERM, handle_interrupt);
@@ -63,6 +71,7 @@ int main() {
   fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
   while (running) {
     int n = epoll_wait(epfd, sevents, MAX_EVENTS, -1);
+    struct client_state *free_head = NULL;
     for (int i = 0; i < n; i++) {
       uint32_t events = sevents[i].events;
       if (sevents[i].data.fd == server_fd) {
@@ -71,25 +80,38 @@ int main() {
       }
       struct fd_ctx *ctx = sevents[i].data.ptr;
       struct client_state *client = ctx->client;
+      if (client->closing) continue;
+      int dead = 0;
       if (events & (EPOLLERR | EPOLLHUP)) {
         printf("EPOLLERR | EPOLLHUP\n");
+        dead = 1;
         if (ctx->kind == FD_BACKEND) backend_handle_err(epfd, client);
-        else client_close_and_free(epfd, client);
+        else client_close_and_mark(epfd, client);
         continue;
       }
       if (ctx->kind == FD_CLIENT) {
-        if (events & (EPOLLIN | EPOLLRDHUP)) client_handle_read(epfd, client);
-        if (events & EPOLLOUT) client_handle_write(epfd, client);
+        if (events & (EPOLLIN | EPOLLRDHUP)) {
+          if (client_handle_read(epfd, client) < 0) dead = 1;
+        }
+        if (events & EPOLLOUT) {
+          if (client_handle_write(epfd, client) < 0) dead = 1;
+        }
       } else if (ctx->kind == FD_BACKEND) {
         if (events & (EPOLLIN | EPOLLHUP)) {
-          printf("EPOLLIN | EPOLLHUP,  FD_BACKEND, reached here!!!\n");
-          backend_handle_read(epfd, client);
+          if (backend_handle_read(epfd, client) < 0) dead = 1;
         }
-        if (events & EPOLLOUT) backend_handle_write(epfd, client);
+        if (events & EPOLLOUT) {
+          if (backend_handle_write(epfd, client) < 0) dead = 1;
+        }
+      }
+      if (dead) {
+        client->next_to_free = free_head;
+        free_head = client;
       }
     }
+    handle_free_list(free_head);
   }
-  printf("closing all epolls and main server thread...\n");
+  printf("closing all clients and main server thread...\n");
   epoll_ctl(epfd, EPOLL_CTL_DEL, server_fd, NULL);
   close(server_fd);
   close(epfd);

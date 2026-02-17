@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "backend.h"
 #include "client.h"
 #include "http.h"
 
@@ -12,6 +13,7 @@ void client_io_buffers_free(struct client_state *client) {
 bool client_init(struct client_state *client, int fd) {
   *client = (struct client_state){
     .fd = fd,
+    .closing = false,
     .state = CLIENT_READING_HEADERS,
     .in_has_body = false,
     .in_header_end = 0,
@@ -47,7 +49,7 @@ bool client_epoll_register(int epfd, int client_fd) {
   fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
   if (epoll_ctl(epfd, EPOLL_CTL_ADD, client->fd, &evt) < 0) {
     perror("epoll_ctl");
-    client_close_and_free(epfd, client);
+    client_close_and_mark(epfd, client);
     return false;
   }
   return true;
@@ -67,12 +69,13 @@ void client_accept_conn(int epfd, int server_fd) {
   }
 }
 
-void client_close_and_free(int epfd, struct client_state *client) {
-  printf("client_close_and_free: client_fd = %d\n", client->fd);
+void client_close_and_mark(int epfd, struct client_state *client) {
+  printf("client_close_and_mark: client_fd = %d\n", client->fd);
   epoll_ctl(epfd, EPOLL_CTL_DEL, client->fd, NULL);
   close(client->fd);
   client_io_buffers_free(client);
-  free(client);
+  backend_close(epfd, &client->backend);
+  client->closing = true;
 }
 
 void client_epoll_switch_state(
@@ -87,7 +90,7 @@ void client_epoll_switch_state(
   evt.data.ptr = &client->client_ctx;
   if (epoll_ctl(epfd, EPOLL_CTL_MOD, client->fd, &evt) < 0) {
     perror("epoll_ctl MOD");
-    client_close_and_free(epfd, client);
+    client_close_and_mark(epfd, client);
   }
 }
 
@@ -141,11 +144,11 @@ bool client_backend_connect(int epfd, struct client_state *client) {
   return backend_epoll_register(epfd, client);
 }
 
-void client_handle_read(int epfd, struct client_state *client) {
+int client_handle_read(int epfd, struct client_state *client) {
   struct buffer *buf = client_current_in_buffer(client);
-  if (!buf) return;
-  printf("client_handle_read: buf->len = %ld\n", buf->len);
-  printf("client_handle_read: client_fd = %d\n", client->fd);
+  if (!buf) return 0;
+  if (client->closing) return -1;
+  printf("client_handle_read: client->fd = %d, buf->len = %ld\n", client->fd, buf->len);
   for (;;) {
     assert(buf->len <= buf->cap);
     ssize_t n = recv(
@@ -154,20 +157,20 @@ void client_handle_read(int epfd, struct client_state *client) {
       buf->cap - buf->len,
       0
     );
-    if (buf->len > buf->cap) printf("error! buf->len = %ld buf->cap = %ld\n", buf->len, buf->cap);
+    if (buf->len > buf->cap)
+      printf("error! buf->len = %ld buf->cap = %ld\n", buf->len, buf->cap);
     if (n == 0) {
-      printf("buf->len = %ld buf->cap = %ld\n", buf->len, buf->cap);
-      printf("client connection closed on read! n == 0\n");
-      client_close_and_free(epfd, client);
-      return;
+      printf("client_handle_read: client connection closed on read! n == 0\n");
+      client_close_and_mark(epfd, client);
+      return -1;
     }
     if (n < 0) {
       if (errno == EINTR)
         continue;
       if (errno == EAGAIN || errno == EWOULDBLOCK)
-        return;
-      client_close_and_free(epfd, client);
-      return;
+        return 0;
+      client_close_and_mark(epfd, client);
+      return -1;
     }
     buf->len += n;
     if (client->state == CLIENT_READING_HEADERS) {
@@ -183,7 +186,7 @@ void client_handle_read(int epfd, struct client_state *client) {
         client_split_after_headers(client, hdr_end);
         client_epoll_switch_state(epfd, client, 1);
         client->in_url_is_static = false;
-        return;
+        return 0;
       }
       if(!client_backend_connect(epfd, client)) {
         http_build_err_resp(
@@ -191,7 +194,7 @@ void client_handle_read(int epfd, struct client_state *client) {
         );
         client_split_after_headers(client, hdr_end);
         client_epoll_switch_state(epfd, client, 1);
-        return;
+        return 0;
       }
     } /*else if (client->state == CLIENT_READING_BODY) {
       if (client->in_body.len >= client->content_length) {
@@ -201,6 +204,7 @@ void client_handle_read(int epfd, struct client_state *client) {
       }
     }*/
   }
+  return 1;
 }
 
 void client_reset_out_headers(struct client_state *client) {
@@ -218,8 +222,8 @@ void client_reset_out_body_or_file(struct client_state *client) {
       client->out_body_kind = BODY_BUFFER;
       break;
     case BODY_BUFFER:
-      client->out_body_sent = 0;
       client->out_body.len = 0;
+      client->out_body_sent = 0;
       client->out_body_kind = BODY_BUFFER;
       break;
     case BODY_NONE:
@@ -228,7 +232,8 @@ void client_reset_out_body_or_file(struct client_state *client) {
   }
 }
 
-void client_handle_write(int epfd, struct client_state *client) {
+int client_handle_write(int epfd, struct client_state *client) {
+  if (client->closing) return -1;
   for (;;) {
     int rc;
     if (client->state == CLIENT_WRITING_HEADERS) {
@@ -238,7 +243,7 @@ void client_handle_write(int epfd, struct client_state *client) {
         &client->out_headers_sent
       );
       if (rc < 0) goto fail;
-      if (rc == 0) return; // EAGAIN → wait for EPOLLOUT
+      if (rc == 0) return 0; // EAGAIN → wait for EPOLLOUT
       client_reset_out_headers(client);
       client_http_adv_state(client); // → WRITING_BODY
       continue;
@@ -260,18 +265,19 @@ void client_handle_write(int epfd, struct client_state *client) {
         );
       } else rc = 1;
       if (rc < 0) goto fail;
-      if (rc == 0) return; // EAGAIN → wait
+      if (rc == 0) return 0; // EAGAIN → wait
       client_reset_out_body_or_file(client);
       client_http_adv_state(client); // → READING_HEADERS
       continue;
     }
     if (client->state == CLIENT_READING_HEADERS) {
       client_epoll_switch_state(epfd, client, 0);
-      return;
+      return 0;
     }
-    return;
+    return 0;
   }
 fail:
-  client_close_and_free(epfd, client);
+  client_close_and_mark(epfd, client);
+  return -1;
 }
 

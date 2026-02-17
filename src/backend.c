@@ -111,7 +111,7 @@ void backend_http_adv_state(struct backend_state *backend) {
   }
 }
 
-void backend_handle_err(int epfd, struct client_state *client) {
+int backend_handle_err(int epfd, struct client_state *client) {
   struct backend_state *backend = &client->backend;
   if (backend->state == BE_CONNECTING) {
     int err = 0;
@@ -128,13 +128,12 @@ void backend_handle_err(int epfd, struct client_state *client) {
     client->in_body_end = 0;
     client->state = CLIENT_WRITING_HEADERS;
     client_epoll_switch_state(epfd, client, 1);
-    return;
   }
-  backend_close(epfd, backend);
-  client_close_and_free(epfd, client);
+  client_close_and_mark(epfd, client);
+  return -1;
 }
 
-void backend_handle_read(int epfd, struct client_state *client) {
+int backend_handle_read(int epfd, struct client_state *client) {
   printf("backend_handle_read: reached!\n");
   struct backend_state *backend = &client->backend;
   int fd = backend->fd;
@@ -142,7 +141,7 @@ void backend_handle_read(int epfd, struct client_state *client) {
     struct buffer *dst;
     if (backend->state == BE_READING_HEADERS) dst = &client->out_headers;
     else if (backend->state == BE_READING_BODY) dst = &client->out_body;
-    else return;
+    else return 0;
     ssize_t n = recv(
       fd,
       dst->data + dst->len,
@@ -164,22 +163,22 @@ void backend_handle_read(int epfd, struct client_state *client) {
       backend_epoll_switch_state(epfd, client, 0, 0);
       backend_close(epfd, backend);
       client_epoll_switch_state(epfd, client, 1);
-      return;
+      return 0;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       printf("errno = %d (%s)\n", errno, strerror(errno));
       break;
     };
-    backend_close(epfd, backend);
-    client_close_and_free(epfd, client);
-    return;
+    client_close_and_mark(epfd, client);
+    return -1;
   }
+  return 0;
   /*if (client->out_headers.len > 0 || client->out_body.len > 0) {
     client_epoll_switch_state(epfd, client, 1);
   }*/
 }
 
-void backend_handle_write(int epfd, struct client_state *client) {
+int backend_handle_write(int epfd, struct client_state *client) {
   printf("backend_handle_write: reached!\n");
   struct backend_state *backend = &client->backend;
   for (;;) {
@@ -203,7 +202,7 @@ void backend_handle_write(int epfd, struct client_state *client) {
         &backend->in_headers_sent
       );
       if (rc < 0) goto fail;
-      if (rc == 0) return;  // EAGAIN
+      if (rc == 0) return 0;  // EAGAIN
       backend_http_adv_state(backend);
       buffer_consume(&client->in_headers, client->in_header_end);
       backend->in_headers_sent = 0;
@@ -216,17 +215,19 @@ void backend_handle_write(int epfd, struct client_state *client) {
         &backend->in_body_sent
       );
       if (rc < 0) goto fail;
-      if (rc == 0) return;  // EAGAIN
+      if (rc == 0) return 0;  // EAGAIN
       backend_http_adv_state(backend);
       buffer_consume(&client->in_body, client->in_body_end);
       backend->in_body_sent = 0;
       backend_epoll_switch_state(epfd, client, 1, 0);
-      return;
+      return 0;
     }
-    return;
+    client_close_and_mark(epfd, client);
+    return -1;
   }
 fail:
-  backend_close(epfd, backend);
+  client_close_and_mark(epfd, client);
+  return -1;
 }
 
 

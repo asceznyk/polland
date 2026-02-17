@@ -26,6 +26,8 @@ enum body_kind {
 
 struct client_state {
   int fd;
+  bool closing;
+  struct client_state *next_to_free;
   bool in_has_body;
   bool in_url_is_static;
   size_t in_header_end;
@@ -55,15 +57,15 @@ struct client_state {
 
 void client_accept_conn(int epfd, int server_fd);
 
-void client_close_and_free(int epfd, struct client_state *client);
+void client_close_and_mark(int epfd, struct client_state *client);
 
 void client_epoll_switch_state(
   int epfd, struct client_state *client, bool add_write
 );
 
-void client_handle_read(int epfd, struct client_state *client);
+int client_handle_read(int epfd, struct client_state *client);
 
-void client_handle_write(int epfd, struct client_state *client);
+int client_handle_write(int epfd, struct client_state *client);
 
 #endif
 
