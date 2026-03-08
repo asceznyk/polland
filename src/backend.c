@@ -47,9 +47,9 @@ bool backend_epoll_register(int epfd, struct client_state *client) {
   printf("backend_epoll_register: reached!\n");
   struct backend_state *backend = &client->backend;
   if (backend->fd < 0) return false;
+  client->backend_ctx.closing = false;
   client->backend_ctx.kind = FD_BACKEND;
   client->backend_ctx.client = client;
-  client->backend_ctx.fd = backend->fd;
   printf("backend_epoll_register: backend_fd = %d\n", backend->fd);
   int flags = fcntl(backend->fd, F_GETFL, 0);
   if (flags < 0 || fcntl(backend->fd, F_SETFL, flags | O_NONBLOCK) < 0) {
@@ -68,6 +68,8 @@ bool backend_epoll_register(int epfd, struct client_state *client) {
 }
 
 void backend_close(int epfd, struct backend_state *backend) {
+  //if (backend->fd == -1) return;
+  printf("backend_close: closing backend with backend_fd = %d\n", backend->fd);
   epoll_ctl(epfd, EPOLL_CTL_DEL, backend->fd, NULL);
   close(backend->fd);
   backend->fd = -1;
@@ -81,7 +83,6 @@ static void backend_epoll_switch_state(
   bool want_write
 ) {
   struct backend_state *backend = &client->backend;
-  printf("backend_epoll_switch_state, want_read = %d, want_write = %d, backend_fd = %d\n", want_read, want_write, backend->fd);
   struct epoll_event evt = {0};
   uint32_t events = EPOLLHUP | EPOLLERR | EPOLLET;
   if (want_read) {
@@ -129,7 +130,7 @@ int backend_handle_err(int epfd, struct client_state *client) {
     client->state = CLIENT_WRITING_HEADERS;
     client_epoll_switch_state(epfd, client, 1);
   }
-  client_close_and_mark(epfd, client);
+  //client_mark_closing(client);
   return -1;
 }
 
@@ -159,6 +160,7 @@ int backend_handle_read(int epfd, struct client_state *client) {
       continue;
     }
     if (n == 0) {
+      printf("backend_handle_read: n == 0! Stopping.\n");
       backend_http_adv_state(backend);
       backend_epoll_switch_state(epfd, client, 0, 0);
       backend_close(epfd, backend);
@@ -166,16 +168,16 @@ int backend_handle_read(int epfd, struct client_state *client) {
       return 0;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      printf("errno = %d (%s)\n", errno, strerror(errno));
+      printf("backend_handle_read: EAGAIN | EWOULDBLOCK\n");
       break;
     };
-    client_close_and_mark(epfd, client);
+    client_mark_closing(client);
     return -1;
   }
-  return 0;
   /*if (client->out_headers.len > 0 || client->out_body.len > 0) {
     client_epoll_switch_state(epfd, client, 1);
   }*/
+  return 0;
 }
 
 int backend_handle_write(int epfd, struct client_state *client) {
@@ -222,11 +224,11 @@ int backend_handle_write(int epfd, struct client_state *client) {
       backend_epoll_switch_state(epfd, client, 1, 0);
       return 0;
     }
-    client_close_and_mark(epfd, client);
+    client_mark_closing(client);
     return -1;
   }
 fail:
-  client_close_and_mark(epfd, client);
+  client_mark_closing(client);
   return -1;
 }
 

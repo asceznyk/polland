@@ -50,14 +50,15 @@ struct client_state {
     CLIENT_READING_BODY,
     CLIENT_WRITING_HEADERS,
     CLIENT_WRITING_BODY,
-    CLIENT_CLOSING,
     CLIENT_IDLE
   } state;
 };
 
 void client_accept_conn(int epfd, int server_fd);
 
-void client_close_and_mark(int epfd, struct client_state *client);
+void client_mark_closing(struct client_state *client);
+
+void client_destroy(int epfd, struct client_state *client);
 
 void client_epoll_switch_state(
   int epfd, struct client_state *client, bool add_write

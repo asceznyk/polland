@@ -7,9 +7,9 @@ enum fd_kind {
 };
 
 struct fd_ctx {
+  bool closing;
   enum fd_kind kind;
   struct client_state *client;
-  int fd;
 };
 
 #endif

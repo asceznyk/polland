@@ -17,14 +17,6 @@ void handle_interrupt(int sig) {
   running = 0;
 }
 
-void handle_free_list(struct client_state *free_head) {
-  while (free_head) {
-    struct client_state *next = free_head->next_to_free;
-    free(free_head);
-    free_head = next;
-  }
-}
-
 int main() {
   signal(SIGINT, handle_interrupt);
   signal(SIGTERM, handle_interrupt);
@@ -79,14 +71,19 @@ int main() {
         continue;
       }
       struct fd_ctx *ctx = sevents[i].data.ptr;
+      if (ctx->closing) continue;
+      printf("ctx->kind = %d!\n", ctx->kind);
       struct client_state *client = ctx->client;
-      if (client->closing) continue;
+      if (client->closing) {
+        printf("client %d marked as closing!\n", client->fd);
+        continue;
+      }
       int dead = 0;
       if (events & (EPOLLERR | EPOLLHUP)) {
         printf("EPOLLERR | EPOLLHUP\n");
         dead = 1;
         if (ctx->kind == FD_BACKEND) backend_handle_err(epfd, client);
-        else client_close_and_mark(epfd, client);
+        else client_mark_closing(client);
         continue;
       }
       if (ctx->kind == FD_CLIENT) {
@@ -109,7 +106,11 @@ int main() {
         free_head = client;
       }
     }
-    handle_free_list(free_head);
+    while (free_head) {
+      struct client_state *next = free_head->next_to_free;
+      client_destroy(epfd, free_head);
+      free_head = next;
+    }
   }
   printf("closing all clients and main server thread...\n");
   epoll_ctl(epfd, EPOLL_CTL_DEL, server_fd, NULL);

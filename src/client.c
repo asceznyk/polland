@@ -26,13 +26,39 @@ bool client_init(struct client_state *client, int fd) {
   if (!buffer_init(&client->in_body, BUFFER_SIZE)) goto fail;
   if (!buffer_init(&client->out_headers, BUFFER_SIZE)) goto fail;
   if (!buffer_init(&client->out_body, BUFFER_SIZE)) goto fail;
+  client->client_ctx.closing = false;
   client->client_ctx.kind = FD_CLIENT;
   client->client_ctx.client = client;
-  client->client_ctx.fd = fd;
   return true;
   fail:
     client_io_buffers_free(client);
     return false;
+}
+
+void client_mark_closing(struct client_state *client) {
+  printf("client_mark_closing: client_fd = %d\n", client->fd);
+  if (client->closing) return;
+  client->backend_ctx.closing = true;
+  client->client_ctx.closing = true;
+  client->closing = true;
+}
+
+void client_destroy(int epfd, struct client_state *client) {
+  printf("client_destroy: reached\n");
+  if (client->fd != -1) {
+    printf("client_destroy: closing client->fd = %d!\n", client->fd);
+    epoll_ctl(epfd, EPOLL_CTL_DEL, client->fd, NULL);
+    close(client->fd);
+    client->fd = -1;
+  }
+  if (client->backend.fd != -1) {
+    printf("client_destroy: backend_close!\n");
+    backend_close(epfd, &client->backend);
+  }
+  client_io_buffers_free(client);
+  client->client_ctx.client = NULL;
+  client->backend_ctx.client = NULL;
+  free(client);
 }
 
 bool client_epoll_register(int epfd, int client_fd) {
@@ -49,7 +75,7 @@ bool client_epoll_register(int epfd, int client_fd) {
   fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
   if (epoll_ctl(epfd, EPOLL_CTL_ADD, client->fd, &evt) < 0) {
     perror("epoll_ctl");
-    client_close_and_mark(epfd, client);
+    client_mark_closing(client);
     return false;
   }
   return true;
@@ -69,15 +95,6 @@ void client_accept_conn(int epfd, int server_fd) {
   }
 }
 
-void client_close_and_mark(int epfd, struct client_state *client) {
-  printf("client_close_and_mark: client_fd = %d\n", client->fd);
-  epoll_ctl(epfd, EPOLL_CTL_DEL, client->fd, NULL);
-  close(client->fd);
-  client_io_buffers_free(client);
-  backend_close(epfd, &client->backend);
-  client->closing = true;
-}
-
 void client_epoll_switch_state(
   int epfd, struct client_state *client, bool add_write
 ) {
@@ -90,7 +107,7 @@ void client_epoll_switch_state(
   evt.data.ptr = &client->client_ctx;
   if (epoll_ctl(epfd, EPOLL_CTL_MOD, client->fd, &evt) < 0) {
     perror("epoll_ctl MOD");
-    client_close_and_mark(epfd, client);
+    client_mark_closing(client);
   }
 }
 
@@ -161,7 +178,7 @@ int client_handle_read(int epfd, struct client_state *client) {
       printf("error! buf->len = %ld buf->cap = %ld\n", buf->len, buf->cap);
     if (n == 0) {
       printf("client_handle_read: client connection closed on read! n == 0\n");
-      client_close_and_mark(epfd, client);
+      client_mark_closing(client);
       return -1;
     }
     if (n < 0) {
@@ -169,7 +186,7 @@ int client_handle_read(int epfd, struct client_state *client) {
         continue;
       if (errno == EAGAIN || errno == EWOULDBLOCK)
         return 0;
-      client_close_and_mark(epfd, client);
+      client_mark_closing(client);
       return -1;
     }
     buf->len += n;
@@ -277,7 +294,7 @@ int client_handle_write(int epfd, struct client_state *client) {
     return 0;
   }
 fail:
-  client_close_and_mark(epfd, client);
+  client_mark_closing(client);
   return -1;
 }
 

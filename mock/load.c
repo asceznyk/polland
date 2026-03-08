@@ -9,7 +9,7 @@
 
 #define CHUNK_DELAY_US 200000
 #define NUM_CLIENTS 100
-#define BUFFER_SIZE 8192 * 3
+#define BUFFER_SIZE (8192 * NUM_CLIENTS)
 #define EXPECTED_RESPONSES 3
 
 void send_chunk(int sock, const char *chunk) {
@@ -60,7 +60,7 @@ void *client_thread(void *arg) {
     if (i < 2)
       send_chunk(sock, "Connection: keep-alive\r\n");
     else
-      send_chunk(sock, "Connection: close\r\n");
+      send_chunk(sock, "Connection: keep-alive\r\n");
     send_chunk(sock, "User-Agent: mock\r\n\r\n");
   }
   char buffer[BUFFER_SIZE];
@@ -70,7 +70,6 @@ void *client_thread(void *arg) {
   while ((n = recv(sock, buffer + total, sizeof(buffer) - total - 1, 0)) > 0) {
     total += n;
     sresp = count_http_responses(buffer);
-    printf("sresp = %d\n", sresp);
     if (sresp >= EXPECTED_RESPONSES) break;
     if (total >= BUFFER_SIZE - 1) {
       fprintf(stderr, "[client %d] buffer overflow risk\n", id);
