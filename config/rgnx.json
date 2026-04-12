@@ -1,0 +1,10 @@
+{
+  "port": 6969,
+  "static_prefix": "/static",
+  "static_root": "/var/www/html",
+  "upstream": {
+    "host": "127.0.0.1",
+    "port": 8000
+  }
+}
+

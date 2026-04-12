@@ -1,3 +1,4 @@
+#include "config.h"
 #include "utils.h"
 #include "backend.h"
 #include "client.h"
@@ -154,7 +155,11 @@ struct buffer *client_current_in_buffer(struct client_state *client) {
 
 bool client_backend_connect(int epfd, struct client_state *client) {
   printf("client_backend_connect: reached!\n");
-  if (backend_connect(&client->backend, BE_HOST, BE_PORT) < 0) {
+  if (backend_connect(
+    &client->backend,
+    server_cfg.upstream.host,
+    server_cfg.upstream.port
+  ) < 0) {
     backend_close(epfd, &client->backend);
     return false;
   }

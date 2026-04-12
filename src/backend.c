@@ -68,7 +68,7 @@ bool backend_epoll_register(int epfd, struct client_state *client) {
 }
 
 void backend_close(int epfd, struct backend_state *backend) {
-  //if (backend->fd == -1) return;
+  if (backend->fd == -1) return;
   printf("backend_close: closing backend with backend_fd = %d\n", backend->fd);
   epoll_ctl(epfd, EPOLL_CTL_DEL, backend->fd, NULL);
   close(backend->fd);
@@ -85,10 +85,7 @@ static void backend_epoll_switch_state(
   struct backend_state *backend = &client->backend;
   struct epoll_event evt = {0};
   uint32_t events = EPOLLHUP | EPOLLERR | EPOLLET;
-  if (want_read) {
-    printf("backend_epoll_switch_state: EPOLLIN\n");
-    events |= EPOLLIN;
-  }
+  if (want_read) events |= EPOLLIN;
   if (want_write) events |= EPOLLOUT;
   evt.events = events;
   evt.data.ptr = &client->backend_ctx;
@@ -231,5 +228,4 @@ fail:
   client_mark_closing(client);
   return -1;
 }
-
 

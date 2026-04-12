@@ -1,3 +1,4 @@
+#include "config.h"
 #include "utils.h"
 #include "http.h"
 
@@ -82,8 +83,8 @@ const char *http_get_mime_type(const char *ext) {
 }
 
 char *http_resolve_static_path(const char *url) {
-  const char *prefix = STATIC_PREFIX;
-  const char *root = STATIC_ROOT;
+  const char *prefix = server_cfg.static_prefix;
+  const char *root = server_cfg.static_root;
   const char *index = "/index.html";
   size_t ulen = strlen(url);
   size_t plen = strlen(prefix);
@@ -125,7 +126,12 @@ void http_build_static_response(
 ) {
   const char *mime_type = NULL;
   printf("url = %s\n", url);
-  if(strcmp(url, STATIC_PREFIX) == 0 || strcmp(url, STATIC_PREFIX "/") == 0) {
+  size_t len = strlen(server_cfg.static_prefix);
+  printf("server_cfg.static_prefix = %s\n", server_cfg.static_prefix);
+  if (
+    strcmp(url, server_cfg.static_prefix) == 0 ||
+    (strncmp(url, server_cfg.static_prefix, len) == 0 && url[len] == '/' && url[len+1] == '\0')
+  ) {
     mime_type = http_get_mime_type("html");
   } else {
     char *ext = http_get_file_extension(url);
@@ -214,11 +220,11 @@ void http_build_out_resp(struct client_state *client, size_t hdr_end) {
   memcpy(tmp, in_headers->data, in_headers->len);
   tmp[in_headers->len] = '\0';
   char *url = http_parse_url(tmp);
-  if (strncmp(url, STATIC_PREFIX, strlen(STATIC_PREFIX)) == 0) {
+  if (strncmp(url, server_cfg.static_prefix, strlen(server_cfg.static_prefix)) == 0) {
     client->in_url_is_static = true;
     http_build_static_out(client, hdr_end, url);
     return;
-  } else if (strcmp(BE_HOST, "") != 0) {
+  } else if (strcmp(server_cfg.upstream.host, "") != 0) {
     client->in_url_is_static = false;
     return;
   }

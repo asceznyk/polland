@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <stdatomic.h>
 
+#include "config.h"
 #include "client.h"
 #include "backend.h"
 
@@ -18,6 +19,7 @@ void handle_interrupt(int sig) {
 }
 
 int main() {
+  server_cfg = config_parse_file("config/rgnx.json");
   signal(SIGINT, handle_interrupt);
   signal(SIGTERM, handle_interrupt);
   int server_fd;
@@ -36,7 +38,7 @@ int main() {
   struct sockaddr_in server_addr = {0};
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = INADDR_ANY;
-  server_addr.sin_port = htons(PORT);
+  server_addr.sin_port = htons(server_cfg.port);
   if (
     bind(
       server_fd,
@@ -51,7 +53,7 @@ int main() {
     perror("failed to listen!\n");
     exit(EXIT_FAILURE);
   }
-  printf("server is listening on PORT %d\n", PORT);
+  printf("server is listening on port %d\n", server_cfg.port);
   int epfd = epoll_create1(0);
   struct epoll_event evt = {
     .events = EPOLLIN,
