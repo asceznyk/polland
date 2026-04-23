@@ -46,6 +46,15 @@ const char *BAD_GATEWAY_HEADER =
 const char *BAD_GATEWAY_BODY =
   "<html><body><h1>502 Bad Gateway</h1><p>The upstream server returned an invalid response.</p></body></html>";
 
+bool http_is_one_point_o(char *data, size_t len) {
+  char *line_end = memmem(data, len, "\r\n", 2);
+  if (!line_end) return false;
+  char *http = memmem(data, line_end - data, "HTTP/", 5);
+  if (!http) return false;
+  if ((line_end - http) < 8) return false;
+  return (memcmp(http, "HTTP/1.0", 8) == 0);
+}
+
 enum http_method http_parse_method(char *data, size_t hdr_end) {
   if (hdr_end >= 3 && !memcmp(data, "GET", 3)) return M_GET;
   if (hdr_end >= 4 && !memcmp(data, "HEAD", 4)) return M_HEAD;
@@ -109,18 +118,6 @@ char *http_resolve_static_path(const char *url) {
   }
   return NULL;
 }
-
-/*int http_open_static_path(char *url) {
-  char *loc = http_resolve_static_path(url);
-  struct stat st;
-  if (stat(loc, &st) == 0 && S_ISDIR(st.st_mode)) {
-    free(loc);
-    return -1;
-  }
-  int fd = open(loc, O_RDONLY);
-  free(loc);
-  return fd;
-}*/
 
 int http_open_static_path(char *url) {
   char *loc = http_resolve_static_path(url);

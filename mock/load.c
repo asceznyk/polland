@@ -5,31 +5,15 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <errno.h>
-#include <assert.h>
 
-#define CHUNK_DELAY_US 200000
 #define NUM_CLIENTS 100
 #define BUFFER_SIZE (8192 * NUM_CLIENTS)
 #define EXPECTED_RESPONSES 3
 
-void send_chunk(int sock, const char *chunk) {
-  ssize_t total = 0;
-  ssize_t len = strlen(chunk);
-  while (total < len) {
-    ssize_t n = send(sock, chunk + total, len - total, 0);
-    if (n <= 0) {
-      perror("send");
-      return;
-    }
-    total += n;
-  }
-  usleep(CHUNK_DELAY_US);
-}
-
 int count_http_responses(const char *buf) {
   int count = 0;
   const char *p = buf;
-  while ((p = strstr(p, "HTTP/1.1 ")) != NULL) {
+  while ((p = strstr(p, "HTTP/1.1")) != NULL) {
     count++;
     p += 9;
   }
@@ -54,23 +38,30 @@ void *client_thread(void *arg) {
     return NULL;
   }
   printf("[client %d] connected\n", id);
-  for (int i = 0; i < 3; i++) {
-    send_chunk(sock, "GET / HTTP/1.1\r\n");
-    send_chunk(sock, "Host: localhost:6969\r\n");
-    if (i < 2)
-      send_chunk(sock, "Connection: keep-alive\r\n");
-    else
-      send_chunk(sock, "Connection: keep-alive\r\n");
-    send_chunk(sock, "User-Agent: mock\r\n\r\n");
+  const char *req =
+    "GET / HTTP/1.1\r\nHost: localhost:6969\r\nConnection: keep-alive\r\n\r\n"
+    "GET / HTTP/1.1\r\nHost: localhost:6969\r\nConnection: keep-alive\r\n\r\n"
+    "GET / HTTP/1.1\r\nHost: localhost:6969\r\nConnection: close\r\n\r\n";
+  ssize_t total_sent = 0;
+  ssize_t len = strlen(req);
+  while (total_sent < len) {
+    ssize_t n = send(sock, req + total_sent, len - total_sent, 0);
+    if (n <= 0) {
+      perror("send");
+      close(sock);
+      return NULL;
+    }
+    total_sent += n;
   }
   char buffer[BUFFER_SIZE];
   ssize_t total = 0;
   ssize_t n;
-  int sresp = 0;
+  int responses = 0;
   while ((n = recv(sock, buffer + total, sizeof(buffer) - total - 1, 0)) > 0) {
     total += n;
-    sresp = count_http_responses(buffer);
-    if (sresp >= EXPECTED_RESPONSES) break;
+    responses = count_http_responses(buffer);
+    if (responses >= EXPECTED_RESPONSES)
+      break;
     if (total >= BUFFER_SIZE - 1) {
       fprintf(stderr, "[client %d] buffer overflow risk\n", id);
       break;
@@ -79,18 +70,16 @@ void *client_thread(void *arg) {
   if (n < 0)
     perror("recv");
   buffer[total] = 0;
-  int responses = count_http_responses(buffer);
   printf("\n==============================\n");
   printf("[client %d] FULL RESPONSE (%ld bytes):\n", id, total);
   printf("%s\n", buffer);
   printf("==============================\n");
-  printf("[client %d] received %d responses (expected %d)\n", id, responses, EXPECTED_RESPONSES);
+  printf("[client %d] received %d responses (expected %d)\n",
+         id, responses, EXPECTED_RESPONSES);
   if (responses != EXPECTED_RESPONSES) {
-    fprintf(
-      stderr,
+    fprintf(stderr,
       "[client %d] ERROR: expected %d responses but got %d\n",
-      id, EXPECTED_RESPONSES, responses
-    );
+      id, EXPECTED_RESPONSES, responses);
     abort();
   }
   close(sock);
@@ -107,4 +96,3 @@ int main() {
   printf("All clients completed successfully.\n");
   return 0;
 }
-

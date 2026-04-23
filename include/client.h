@@ -30,6 +30,7 @@ struct client_state {
   struct client_state *next_to_free;
   bool in_has_body;
   bool in_url_is_static;
+  bool is_http_one_point_o;
   size_t in_header_end;
   struct buffer in_stream;
   struct buffer out_stream;

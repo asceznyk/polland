@@ -121,24 +121,9 @@ void client_http_adv_state(struct client_state *client) {
   }
 }
 
-/*void client_split_after_headers(struct client_state *client, size_t hdr_end) {
-  printf("client_split_after_headers: reached!\n");
-  struct buffer *headers = &client->in_headers;
-  if (client->state != CLIENT_READING_BODY) {
-    buffer_consume(headers, hdr_end);
-    return;
-  }
-  size_t extra = headers->len - hdr_end;
-  if (extra == 0) {
-    headers->len = hdr_end;
-    return;
-  }
-  buffer_append(&client->in_body, headers->data + hdr_end, extra);
-  headers->len = hdr_end;
-}*/
-
 bool client_backend_connect(int epfd, struct client_state *client) {
   printf("client_backend_connect: reached!\n");
+  if (client->backend.fd != -1) return true;
   if (backend_connect(
     &client->backend,
     server_cfg.upstream.host,
@@ -201,6 +186,7 @@ int client_handle_read(int epfd, struct client_state *client) {
     if (client->state == CLIENT_READING_HEADERS) {
       ssize_t hdr_end = find_double_crlf(buf->data, buf->len, 0);
       if (hdr_end == -1) continue;
+      client->is_http_one_point_o = http_is_one_point_o(client->in_stream.data, client->in_stream.len);
       client->in_header_end = (size_t)hdr_end;
       client_http_adv_state(client);
       if (client->state != CLIENT_WRITING_HEADERS) continue;
@@ -283,6 +269,7 @@ int client_handle_write(int epfd, struct client_state *client) {
       continue;
     }
     if (client->state == CLIENT_READING_HEADERS) {
+      if (client->is_http_one_point_o) goto fail;
       client_epoll_switch_state(epfd, client, 0);
       return 0;
     }

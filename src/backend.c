@@ -171,8 +171,6 @@ int backend_handle_read(int epfd, struct client_state *client) {
     }
     if (n == 0) {
       printf("backend_handle_read: n == 0! Stopping.\n");
-      backend_http_adv_state(backend);
-      backend_epoll_switch_state(epfd, client, 0, 0);
       backend_close(epfd, backend);
       client_epoll_switch_state(epfd, client, 1);
       return 0;
@@ -184,6 +182,9 @@ int backend_handle_read(int epfd, struct client_state *client) {
     client_mark_closing(client);
     return -1;
   }
+  /*if (client->out_stream.len > 0) {
+    client_epoll_switch_state(epfd, client, 1);
+  }*/
   return 0;
 }
 
@@ -227,20 +228,6 @@ int backend_handle_write(int epfd, struct client_state *client) {
       }
       continue;
     }
-    /*if (backend->state == BE_WRITING_BODY) {
-      rc = buffer_send_flat(
-        backend->fd,
-        &client->in_body,
-        &backend->in_body_sent
-      );
-      if (rc < 0) goto fail;
-      if (rc == 0) return 0;  // EAGAIN
-      backend_http_adv_state(backend);
-      buffer_consume(&client->in_body, client->in_body_end);
-      backend->in_body_sent = 0;
-      backend_epoll_switch_state(epfd, client, 1, 0);
-      return 0;
-    }*/
     client_mark_closing(client);
     return -1;
   }
