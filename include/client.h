@@ -31,13 +31,9 @@ struct client_state {
   bool in_has_body;
   bool in_url_is_static;
   size_t in_header_end;
-  struct buffer in_headers;
-  size_t in_body_end;
-  struct buffer in_body;
-  struct buffer out_headers;
-  size_t out_headers_sent;
-  struct buffer out_body;
-  size_t out_body_sent;
+  struct buffer in_stream;
+  struct buffer out_stream;
+  size_t out_sent;
   enum body_kind out_body_kind;
   int out_file_fd;
   size_t out_file_size;

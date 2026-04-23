@@ -7,21 +7,33 @@
 void backend_init(struct backend_state *backend) {
   backend->fd = -1;
   backend->state = BE_CONNECTING;
-  backend->in_headers_sent = 0;
-  backend->in_body_sent = 0;
+  backend->in_sent = 0;
 }
 
-int backend_connect(
-  struct backend_state *backend, const char *ip, uint16_t port
-) {
-  int fd;
+int backend_connect(struct backend_state *backend, const char *ip, uint16_t port) {
+  int fd = -1;
   int flags;
   struct sockaddr_in addr;
   int rc;
+  if (!backend || !ip) return -1;
   fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) return -1;
+  if (fd < 0) {
+    perror("socket");
+    return -1;
+  }
+  if (fd <= 2) {
+    fprintf(stderr, "backend_connect: suspicious fd=%d (stdio?), aborting\n", fd);
+    close(fd);
+    return -1;
+  }
   flags = fcntl(fd, F_GETFL, 0);
-  if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+  if (flags < 0) {
+    perror("fcntl(F_GETFL)");
+    close(fd);
+    return -1;
+  }
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+    perror("fcntl(F_SETFL)");
     close(fd);
     return -1;
   }
@@ -29,17 +41,24 @@ int backend_connect(
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
   if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) {
+    fprintf(stderr, "inet_pton failed for %s\n", ip);
     close(fd);
     return -1;
   }
   rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-  if (rc < 0 && errno != EINPROGRESS) {
-    close(fd);
-    return -1;
+  if (rc == 0) {
+    backend->state = BE_CONNECTING;
+  } else if (rc < 0) {
+    if (errno == EINPROGRESS) {
+      backend->state = BE_CONNECTING;
+    } else {
+      perror("connect");
+      close(fd);
+      return -1;
+    }
   }
-  printf("backend_connect: rc = %d!\n", rc);
   backend->fd = fd;
-  backend->state = BE_CONNECTING;
+  printf("backend_connect: fd=%d state=%d\n", fd, backend->state);
   return 0;
 }
 
@@ -82,6 +101,7 @@ static void backend_epoll_switch_state(
   bool want_read,
   bool want_write
 ) {
+  printf("backend_epoll_switch_state: want_read = %d, want_write = %d\n", want_read, want_write);
   struct backend_state *backend = &client->backend;
   struct epoll_event evt = {0};
   uint32_t events = EPOLLHUP | EPOLLERR | EPOLLET;
@@ -120,10 +140,7 @@ int backend_handle_err(int epfd, struct client_state *client) {
     http_build_err_resp(
       client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
     );
-    buffer_consume(&client->in_headers, client->in_header_end);
-    buffer_consume(&client->in_body, client->in_body_end);
-    client->in_header_end = 0;
-    client->in_body_end = 0;
+    buffer_consume(&client->in_stream, strlen(client->in_stream.data));
     client->state = CLIENT_WRITING_HEADERS;
     client_epoll_switch_state(epfd, client, 1);
   }
@@ -135,11 +152,8 @@ int backend_handle_read(int epfd, struct client_state *client) {
   printf("backend_handle_read: reached!\n");
   struct backend_state *backend = &client->backend;
   int fd = backend->fd;
+  struct buffer *dst = &client->out_stream;
   for (;;) {
-    struct buffer *dst;
-    if (backend->state == BE_READING_HEADERS) dst = &client->out_headers;
-    else if (backend->state == BE_READING_BODY) dst = &client->out_body;
-    else return 0;
     ssize_t n = recv(
       fd,
       dst->data + dst->len,
@@ -149,11 +163,10 @@ int backend_handle_read(int epfd, struct client_state *client) {
     if (n > 0) {
       dst->len += n;
       if (
-        backend->state == BE_READING_HEADERS &&
-        find_double_crlf(dst->data, dst->len, 0)
-      ) {
-        backend_http_adv_state(backend); // -> BE_READING_BODY
-      }
+        (backend->state == BE_READING_HEADERS &&
+        find_double_crlf(dst->data, dst->len, 0) != -1) ||
+        backend->state == BE_READING_BODY
+      ) backend_http_adv_state(backend);
       continue;
     }
     if (n == 0) {
@@ -171,9 +184,6 @@ int backend_handle_read(int epfd, struct client_state *client) {
     client_mark_closing(client);
     return -1;
   }
-  /*if (client->out_headers.len > 0 || client->out_body.len > 0) {
-    client_epoll_switch_state(epfd, client, 1);
-  }*/
   return 0;
 }
 
@@ -194,20 +204,30 @@ int backend_handle_write(int epfd, struct client_state *client) {
       backend_http_adv_state(backend);
       continue;
     }
-    if (backend->state == BE_WRITING_HEADERS) {
+    if (
+      backend->state == BE_WRITING_HEADERS ||
+      backend->state == BE_WRITING_BODY
+    ) {
+      printf("backend_handle_write: "); print_client_in_buffers(client);
       rc = buffer_send_flat(
         backend->fd,
-        &client->in_headers,
-        &backend->in_headers_sent
+        &client->in_stream,
+        &backend->in_sent
       );
       if (rc < 0) goto fail;
       if (rc == 0) return 0;  // EAGAIN
       backend_http_adv_state(backend);
-      buffer_consume(&client->in_headers, client->in_header_end);
-      backend->in_headers_sent = 0;
+      buffer_consume(&client->in_stream, backend->in_sent);
+      backend->in_sent = 0;
+      printf("backend_handle_write: backend->state = %d\n", backend->state);
+      if (backend->state == BE_READING_HEADERS) {
+        printf("backend_handle_write: BE_READING_HEADERS, backend_epoll_switch_state\n");
+        backend_epoll_switch_state(epfd, client, 1, 0);
+        return 0;
+      }
       continue;
     }
-    if (backend->state == BE_WRITING_BODY) {
+    /*if (backend->state == BE_WRITING_BODY) {
       rc = buffer_send_flat(
         backend->fd,
         &client->in_body,
@@ -220,7 +240,7 @@ int backend_handle_write(int epfd, struct client_state *client) {
       backend->in_body_sent = 0;
       backend_epoll_switch_state(epfd, client, 1, 0);
       return 0;
-    }
+    }*/
     client_mark_closing(client);
     return -1;
   }

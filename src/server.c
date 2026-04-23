@@ -73,8 +73,9 @@ int main() {
         continue;
       }
       struct fd_ctx *ctx = sevents[i].data.ptr;
+      printf("ctx->kind = %d, ctx->closing = %d, ctx->client.fd = %d\n", ctx->kind, ctx->closing, ctx->client->fd);
       if (ctx->closing) continue;
-      printf("ctx->kind = %d!\n", ctx->kind);
+      //printf("ctx->kind = %d!\n", ctx->kind);
       struct client_state *client = ctx->client;
       if (client->closing) {
         printf("client %d marked as closing!\n", client->fd);

@@ -2,6 +2,9 @@ CC := gcc
 
 CFLAGS := -Wall -Wextra -g -O0 \
           -fsanitize=address,undefined -fno-omit-frame-pointer \
+          -rdynamic \
+          -DDEBUG_FD \
+          -include include/debug.h \
           -Iinclude -I3rdparty/yyjson/src
 
 YYJSON_CFLAGS := -O2

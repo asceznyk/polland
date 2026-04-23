@@ -1,6 +1,7 @@
 #ifndef BUFFER_H
 #define BUFFER_H
 
+#include <stdio.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdlib.h>

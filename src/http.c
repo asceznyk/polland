@@ -1,6 +1,7 @@
 #include "config.h"
 #include "utils.h"
 #include "http.h"
+#include "buffer.h"
 
 const char *NOT_FOUND_HEADER =
   "HTTP/1.1 404 Not Found\r\n"
@@ -109,7 +110,7 @@ char *http_resolve_static_path(const char *url) {
   return NULL;
 }
 
-int http_open_static_path(char *url) {
+/*int http_open_static_path(char *url) {
   char *loc = http_resolve_static_path(url);
   struct stat st;
   if (stat(loc, &st) == 0 && S_ISDIR(st.st_mode)) {
@@ -118,6 +119,26 @@ int http_open_static_path(char *url) {
   }
   int fd = open(loc, O_RDONLY);
   free(loc);
+  return fd;
+}*/
+
+int http_open_static_path(char *url) {
+  char *loc = http_resolve_static_path(url);
+  if (!loc) return -1;
+  int fd = open(loc, O_RDONLY);
+  free(loc);
+  if (fd < 0) return -1;
+  if (fd <= 2) {
+    int newfd = fcntl(fd, F_DUPFD, 3);
+    close(fd);
+    fd = newfd;
+    if (fd < 0) return -1;
+  }
+  struct stat st;
+  if (fstat(fd, &st) < 0 || S_ISDIR(st.st_mode)) {
+    close(fd);
+    return -1;
+  }
   return fd;
 }
 
@@ -150,11 +171,9 @@ void http_build_static_response(
       "\r\n",
     mime_type, (size_t)content_len
   );
-  struct buffer *out_headers = &client->out_headers;
-  out_headers->data = malloc((size_t)header_len);
-  memcpy(out_headers->data, header, (size_t)header_len);
-  out_headers->len = header_len;
-  out_headers->cap = header_len;
+  struct buffer *out_stream = &client->out_stream;
+  memcpy(out_stream->data, header, (size_t)header_len);
+  out_stream->len = header_len;
   if (is_head) {
     close(file_fd);
     return;
@@ -166,11 +185,6 @@ void http_build_static_response(
 
 void http_fill_buffer(struct buffer *buf, const char *fill_buf) {
   size_t n = strlen(fill_buf);
-  char *data = malloc(n);
-  if (!data) return;
-  free(buf->data);
-  buf->data = data;
-  buf->cap = n;
   buf->len = n;
   memcpy(buf->data, fill_buf, n);
 }
@@ -181,9 +195,9 @@ void http_build_err_resp(
   const char *err_body,
   bool is_head
 ) {
-  http_fill_buffer(&client->out_headers, err_header);
+  http_fill_buffer(&client->out_stream, err_header);
   if (is_head) return;
-  http_fill_buffer(&client->out_body, err_body);
+  buffer_append(&client->out_stream, err_body, strlen(err_body));
 }
 
 void http_fill_static_resp_get(
@@ -197,14 +211,15 @@ void http_fill_static_resp_get(
     );
     return;
   }
+  printf("http_fill_static_resp_get: file_fd = %d\n", file_fd);
   http_build_static_response(client, url, file_fd, is_head);
 }
 
 void http_build_static_out(
   struct client_state *client, size_t hdr_end, char *url
 ) {
-  struct buffer *in_headers = &client->in_headers;
-  enum http_method method = http_parse_method(in_headers->data, hdr_end);
+  struct buffer *in_stream = &client->in_stream;
+  enum http_method method = http_parse_method(in_stream->data, hdr_end);
   if (method == M_HEAD || method == M_GET) {
     http_fill_static_resp_get(client, url, (method == M_HEAD));
     return;
@@ -215,10 +230,10 @@ void http_build_static_out(
 }
 
 void http_build_out_resp(struct client_state *client, size_t hdr_end) {
-  struct buffer *in_headers = &client->in_headers;
+  struct buffer *in_stream = &client->in_stream;
   char tmp[BUFFER_SIZE];
-  memcpy(tmp, in_headers->data, in_headers->len);
-  tmp[in_headers->len] = '\0';
+  memcpy(tmp, in_stream->data, in_stream->len);
+  tmp[in_stream->len] = '\0';
   char *url = http_parse_url(tmp);
   if (strncmp(url, server_cfg.static_prefix, strlen(server_cfg.static_prefix)) == 0) {
     client->in_url_is_static = true;

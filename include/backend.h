@@ -22,8 +22,7 @@ struct backend_state {
     BE_WRITING_BODY,
     BE_DONE
   } state;
-  size_t in_headers_sent;
-  size_t in_body_sent;
+  size_t in_sent;
 };
 
 void backend_init(struct backend_state *backend);
