@@ -149,6 +149,7 @@ int backend_handle_err(int epfd, struct client_state *client) {
 
 int backend_handle_read(int epfd, struct client_state *client) {
   printf("backend_handle_read: reached!\n");
+  if (client->closing) return -1;
   struct backend_state *backend = &client->backend;
   int fd = backend->fd;
   struct buffer *dst = &client->out_stream;
@@ -189,6 +190,7 @@ int backend_handle_read(int epfd, struct client_state *client) {
 
 int backend_handle_write(int epfd, struct client_state *client) {
   printf("backend_handle_write: reached!\n");
+  if (client->closing) return -1;
   struct backend_state *backend = &client->backend;
   for (;;) {
     int rc;

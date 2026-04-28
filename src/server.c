@@ -63,10 +63,11 @@ int main() {
   struct epoll_event sevents[MAX_EVENTS];
   int flags = fcntl(server_fd, F_GETFL, 0);
   fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
+  struct client_state *free_head = NULL;
   while (running) {
     printf("main: epoll_wait?!\n");
     int n = epoll_wait(epfd, sevents, MAX_EVENTS, -1);
-    struct client_state *free_head = NULL;
+    free_head = NULL;
     printf("main: n = %d\n", n);
     for (int i = 0; i < n; i++) {
       uint32_t events = sevents[i].events;
@@ -76,7 +77,6 @@ int main() {
       }
       struct fd_ctx *ctx = sevents[i].data.ptr;
       printf("main: ctx->kind = %d, ctx->closing = %d, ctx->client.fd = %d\n", ctx->kind, ctx->closing, ctx->client->fd);
-      if (ctx->closing) continue;
       struct client_state *client = ctx->client;
       if (client->closing) {
         printf("main: client %d marked as closing!\n", client->fd);
@@ -112,7 +112,7 @@ int main() {
       }
     }
     while (free_head) {
-      printf("main: freeing client!\n");
+      printf("main: freeing client fd = %d!\n", free_head->fd);
       struct client_state *next = free_head->next_to_free;
       client_destroy(epfd, free_head);
       free_head = next;

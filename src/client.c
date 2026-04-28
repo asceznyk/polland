@@ -123,7 +123,7 @@ void client_http_adv_state(struct client_state *client) {
 
 bool client_backend_connect(int epfd, struct client_state *client) {
   printf("client_backend_connect: reached!\n");
-  if (client->backend.fd != -1) return true;
+  if (client->backend.fd != -1) backend_close(epfd, &client->backend); //return true;
   if (backend_connect(
     &client->backend,
     server_cfg.upstream.host,
