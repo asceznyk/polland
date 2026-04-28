@@ -87,14 +87,14 @@ void client_accept_conn(int epfd, int server_fd) {
         perror("accept");
       break;
     }
-    if(!client_epoll_register(epfd, client_fd)) break;
+    if (!client_epoll_register(epfd, client_fd)) break;
   }
 }
 
 void client_epoll_switch_state(
   int epfd, struct client_state *client, bool add_write
 ) {
-  printf("client_epoll_switch_state, fd = %d, add_write = %d\n", client->fd, add_write);
+  printf("client_epoll_switch_state: fd = %d, add_write = %d\n", client->fd, add_write);
   struct epoll_event evt = {0};
   uint32_t events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
   if (add_write)
@@ -117,7 +117,7 @@ void client_http_adv_state(struct client_state *client) {
   } else if (client->state == CLIENT_WRITING_HEADERS) {
     client->state = CLIENT_WRITING_BODY;
   } else if (client->state == CLIENT_WRITING_BODY) {
-    client->state = CLIENT_READING_HEADERS; //keep-alive
+    client->state = CLIENT_READING_HEADERS;
   }
 }
 
@@ -177,8 +177,10 @@ int client_handle_read(int epfd, struct client_state *client) {
     if (n < 0) {
       if (errno == EINTR)
         continue;
-      if (errno == EAGAIN || errno == EWOULDBLOCK)
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        printf("client_handle_read: EAGAIN\n");
         return 0;
+      }
       client_mark_closing(client);
       return -1;
     }
@@ -194,18 +196,18 @@ int client_handle_read(int epfd, struct client_state *client) {
       http_build_out_resp(client, hdr_end);
       printf("client_handle_read: CLIENT_WRITING_HEADERS "); print_client_out_buffers(client);
       if (client->in_url_is_static) {
-        buffer_consume(&client->in_stream, hdr_end); //client_split_after_headers(client, hdr_end);
+        buffer_consume(&client->in_stream, hdr_end);
         client_epoll_switch_state(epfd, client, 1);
         client->in_url_is_static = false;
-        return 0;
+        continue;
       }
       if(!client_backend_connect(epfd, client)) {
         http_build_err_resp(
           client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
         );
-        buffer_consume(&client->in_stream, hdr_end); //client_split_after_headers(client, hdr_end);
+        buffer_consume(&client->in_stream, hdr_end);
         client_epoll_switch_state(epfd, client, 1);
-        return 0;
+        continue;
       }
     } /*else if (client->state == CLIENT_READING_BODY) {
       if (client->in_body.len >= client->content_length) {
@@ -265,11 +267,12 @@ int client_handle_write(int epfd, struct client_state *client) {
       if (rc < 0) goto fail;
       if (rc == 0) return 0; // EAGAIN → wait
       client_reset_out_streams(client);
-      client_http_adv_state(client); // → READING_HEADERS
+      client_http_adv_state(client);
       continue;
     }
     if (client->state == CLIENT_READING_HEADERS) {
       if (client->is_http_one_point_o) goto fail;
+      printf("client_handle_write: client_epoll_switch_state!\n");
       client_epoll_switch_state(epfd, client, 0);
       return 0;
     }

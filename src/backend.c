@@ -144,7 +144,6 @@ int backend_handle_err(int epfd, struct client_state *client) {
     client->state = CLIENT_WRITING_HEADERS;
     client_epoll_switch_state(epfd, client, 1);
   }
-  //client_mark_closing(client);
   return -1;
 }
 
@@ -173,6 +172,8 @@ int backend_handle_read(int epfd, struct client_state *client) {
       printf("backend_handle_read: n == 0! Stopping.\n");
       backend_close(epfd, backend);
       client_epoll_switch_state(epfd, client, 1);
+      client_http_adv_state(client);
+      printf("backend_handle_read: client->state = %d\n", client->state);
       return 0;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -182,9 +183,7 @@ int backend_handle_read(int epfd, struct client_state *client) {
     client_mark_closing(client);
     return -1;
   }
-  /*if (client->out_stream.len > 0) {
-    client_epoll_switch_state(epfd, client, 1);
-  }*/
+  if (client->out_stream.len > 0) client_epoll_switch_state(epfd, client, 1);
   return 0;
 }
 
@@ -194,11 +193,9 @@ int backend_handle_write(int epfd, struct client_state *client) {
   for (;;) {
     int rc;
     if (backend->state == BE_CONNECTING) {
-      printf("backend_handle_write: BE_CONNECTING\n");
       int err = 0;
       socklen_t len = sizeof(err);
       if (getsockopt(backend->fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) {
-        printf("backend_handle_write: FAILED TO CONNECT!\n");
         goto fail;
       }
       if (err != 0) goto fail;
@@ -209,7 +206,6 @@ int backend_handle_write(int epfd, struct client_state *client) {
       backend->state == BE_WRITING_HEADERS ||
       backend->state == BE_WRITING_BODY
     ) {
-      printf("backend_handle_write: "); print_client_in_buffers(client);
       rc = buffer_send_flat(
         backend->fd,
         &client->in_stream,
@@ -220,9 +216,7 @@ int backend_handle_write(int epfd, struct client_state *client) {
       backend_http_adv_state(backend);
       buffer_consume(&client->in_stream, backend->in_sent);
       backend->in_sent = 0;
-      printf("backend_handle_write: backend->state = %d\n", backend->state);
       if (backend->state == BE_READING_HEADERS) {
-        printf("backend_handle_write: BE_READING_HEADERS, backend_epoll_switch_state\n");
         backend_epoll_switch_state(epfd, client, 1, 0);
         return 0;
       }

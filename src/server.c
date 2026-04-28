@@ -14,7 +14,7 @@
 static atomic_bool running = 1;
 
 void handle_interrupt(int sig) {
-  printf("SIGINT/SIGTERM recieved, stopping the server..\n");
+  printf("handle_interrupt: SIGINT/SIGTERM recieved, stopping the server..\n");
   running = 0;
 }
 
@@ -53,7 +53,7 @@ int main() {
     perror("failed to listen!\n");
     exit(EXIT_FAILURE);
   }
-  printf("server is listening on port %d\n", server_cfg.port);
+  printf("main: server is listening on port %d\n", server_cfg.port);
   int epfd = epoll_create1(0);
   struct epoll_event evt = {
     .events = EPOLLIN,
@@ -64,8 +64,10 @@ int main() {
   int flags = fcntl(server_fd, F_GETFL, 0);
   fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
   while (running) {
+    printf("main: epoll_wait?!\n");
     int n = epoll_wait(epfd, sevents, MAX_EVENTS, -1);
     struct client_state *free_head = NULL;
+    printf("main: n = %d\n", n);
     for (int i = 0; i < n; i++) {
       uint32_t events = sevents[i].events;
       if (sevents[i].data.fd == server_fd) {
@@ -73,17 +75,16 @@ int main() {
         continue;
       }
       struct fd_ctx *ctx = sevents[i].data.ptr;
-      printf("ctx->kind = %d, ctx->closing = %d, ctx->client.fd = %d\n", ctx->kind, ctx->closing, ctx->client->fd);
+      printf("main: ctx->kind = %d, ctx->closing = %d, ctx->client.fd = %d\n", ctx->kind, ctx->closing, ctx->client->fd);
       if (ctx->closing) continue;
-      //printf("ctx->kind = %d!\n", ctx->kind);
       struct client_state *client = ctx->client;
       if (client->closing) {
-        printf("client %d marked as closing!\n", client->fd);
+        printf("main: client %d marked as closing!\n", client->fd);
         continue;
       }
       int dead = 0;
       if (events & (EPOLLERR | EPOLLHUP)) {
-        printf("EPOLLERR | EPOLLHUP\n");
+        printf("main: EPOLLERR | EPOLLHUP\n");
         dead = 1;
         if (ctx->kind == FD_BACKEND) backend_handle_err(epfd, client);
         else client_mark_closing(client);
@@ -95,6 +96,7 @@ int main() {
         }
         if (events & EPOLLOUT) {
           if (client_handle_write(epfd, client) < 0) dead = 1;
+          printf("main: client_handle_write done!\n");
         }
       } else if (ctx->kind == FD_BACKEND) {
         if (events & (EPOLLIN | EPOLLHUP)) {
@@ -110,12 +112,14 @@ int main() {
       }
     }
     while (free_head) {
+      printf("main: freeing client!\n");
       struct client_state *next = free_head->next_to_free;
       client_destroy(epfd, free_head);
       free_head = next;
     }
+    printf("main: end of iteration!\n");
   }
-  printf("closing all clients and main server thread...\n");
+  printf("main: closing all clients and main server thread...\n");
   epoll_ctl(epfd, EPOLL_CTL_DEL, server_fd, NULL);
   close(server_fd);
   close(epfd);

@@ -61,6 +61,8 @@ void client_epoll_switch_state(
   int epfd, struct client_state *client, bool add_write
 );
 
+void client_http_adv_state(struct client_state *client);
+
 int client_handle_read(int epfd, struct client_state *client);
 
 int client_handle_write(int epfd, struct client_state *client);
