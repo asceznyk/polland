@@ -1,6 +1,6 @@
-# Rgnx
+# rgnx
 
-**Rgnx** is a minimal, experimental HTTP server inspired by the architecture and philosophy of **NGINX**.
+**rgnx** is a minimal, experimental HTTP server inspired by the architecture and philosophy of **NGINX**.
 The goal of the project is to understand how high-performance web servers work internally by building one from scratch.
 
 This project is currently **a work in progress**. The design, features, and APIs are actively evolving.
@@ -8,7 +8,7 @@ This project is currently **a work in progress**. The design, features, and APIs
 
 ## Overview
 
-Rgnx is a small web server that explores core ideas behind modern event-driven servers such as:
+rgnx is a small web server that explores core ideas behind modern event-driven servers such as:
 
 * Non-blocking network I/O
 * Event-driven request handling
@@ -50,7 +50,7 @@ make
 ### 3. Run the server
 
 ```bash
-./out/server
+./out/rgnx
 ```
 
 By default the server starts on:
@@ -62,7 +62,7 @@ http://localhost:6969
 
 ## Status
 
-Rgnx is **early stage** and not intended for any kind of actual use.
+rgnx is **early stage** and not intended for any kind of actual use.
 
 The primary goal is learning how a system like **NGINX** works internally.
 
