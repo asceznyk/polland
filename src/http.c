@@ -143,9 +143,9 @@ void http_build_static_response(
   struct client_state *client, char *url, int file_fd, bool is_head
 ) {
   const char *mime_type = NULL;
-  printf("url = %s\n", url);
+  printf("http_build_static_response: url = %s\n", url);
   size_t len = strlen(server_cfg.static_prefix);
-  printf("server_cfg.static_prefix = %s\n", server_cfg.static_prefix);
+  printf("http_build_static_response: server_cfg.static_prefix = %s\n", server_cfg.static_prefix);
   if (
     strcmp(url, server_cfg.static_prefix) == 0 ||
     (strncmp(url, server_cfg.static_prefix, len) == 0 && url[len] == '/' && url[len+1] == '\0')

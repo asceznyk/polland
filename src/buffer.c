@@ -52,6 +52,7 @@ int buffer_send_flat(
     }
     if (n == 0) return -1;
     if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+    printf("buffer_send_flat: failed?\n");
     return -1;
   }
   return 1;

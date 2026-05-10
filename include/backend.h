@@ -14,14 +14,18 @@ struct client_state;
 
 struct backend_state {
   int fd;
+  bool in_has_body;
   enum {
     BE_CONNECTING,
-    BE_READING_HEADERS,
-    BE_READING_BODY,
     BE_WRITING_HEADERS,
     BE_WRITING_BODY,
-    BE_DONE
-  } state;
+    BE_REQ_COMPLETE
+  } in_state;
+  enum {
+    BE_READING_HEADERS,
+    BE_READING_BODY,
+    BE_RESP_COMPLETE
+  } out_state;
   size_t in_sent;
 };
 

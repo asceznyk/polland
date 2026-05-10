@@ -45,10 +45,13 @@ struct client_state {
   enum {
     CLIENT_READING_HEADERS,
     CLIENT_READING_BODY,
+    CLIENT_REQ_COMPLETE
+  } in_state;
+  enum  {
     CLIENT_WRITING_HEADERS,
     CLIENT_WRITING_BODY,
-    CLIENT_IDLE
-  } state;
+    CLIENT_RESP_COMPLETE
+  } out_state;
 };
 
 void client_accept_conn(int epfd, int server_fd);

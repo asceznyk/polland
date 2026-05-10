@@ -13,7 +13,8 @@ bool client_init(struct client_state *client, int fd) {
   *client = (struct client_state){
     .fd = fd,
     .closing = false,
-    .state = CLIENT_READING_HEADERS,
+    .in_state = CLIENT_READING_HEADERS,
+    .out_state = CLIENT_WRITING_HEADERS,
     .in_has_body = false,
     .out_file_fd = -1,
     .out_file_offset = 0,
@@ -65,7 +66,7 @@ bool client_epoll_register(int epfd, int client_fd) {
   }
   if(!client_init(client, client_fd)) return false;
   struct epoll_event evt = {0};
-  evt.events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+  evt.events = EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
   evt.data.ptr = &client->client_ctx;
   int flags = fcntl(client_fd, F_GETFL, 0);
   fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
@@ -91,39 +92,9 @@ void client_accept_conn(int epfd, int server_fd) {
   }
 }
 
-void client_epoll_switch_state(
-  int epfd, struct client_state *client, bool add_write
-) {
-  printf("client_epoll_switch_state: fd = %d, add_write = %d\n", client->fd, add_write);
-  struct epoll_event evt = {0};
-  uint32_t events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
-  if (add_write)
-    events |= EPOLLOUT;
-  evt.events = events;
-  evt.data.ptr = &client->client_ctx;
-  if (epoll_ctl(epfd, EPOLL_CTL_MOD, client->fd, &evt) < 0) {
-    perror("epoll_ctl MOD");
-    client_mark_closing(client);
-  }
-}
-
-void client_http_adv_state(struct client_state *client) {
-  if (client->state == CLIENT_READING_HEADERS) {
-    client->state = client->in_has_body ?
-      CLIENT_READING_BODY :
-      CLIENT_WRITING_HEADERS;
-  } else if (client->state == CLIENT_READING_BODY) {
-    client->state = CLIENT_WRITING_HEADERS;
-  } else if (client->state == CLIENT_WRITING_HEADERS) {
-    client->state = CLIENT_WRITING_BODY;
-  } else if (client->state == CLIENT_WRITING_BODY) {
-    client->state = CLIENT_READING_HEADERS;
-  }
-}
-
 bool client_backend_connect(int epfd, struct client_state *client) {
   printf("client_backend_connect: reached!\n");
-  if (client->backend.fd != -1) backend_close(epfd, &client->backend); //return true;
+  if (client->backend.fd != -1) backend_close(epfd, &client->backend);
   if (backend_connect(
     &client->backend,
     server_cfg.upstream.host,
@@ -135,20 +106,21 @@ bool client_backend_connect(int epfd, struct client_state *client) {
   return backend_epoll_register(epfd, client);
 }
 
-
-struct buffer *client_current_in_buffer(struct client_state *client) {
-  printf("client_current_in_buffer: client->state = %d\n", client->state);
-  if (
-    client->state == CLIENT_READING_HEADERS ||
-    client->state == CLIENT_READING_BODY
-  )
-    return &client->in_stream;
-  return NULL;
+void client_adv_in_state(struct client_state *client) {
+  if (client->in_state == CLIENT_READING_HEADERS) {
+    client->in_state = client->in_has_body ?
+      CLIENT_READING_BODY :
+      CLIENT_REQ_COMPLETE;
+  } else if (client->in_state == CLIENT_READING_BODY) {
+    client->in_state = CLIENT_REQ_COMPLETE;
+  } else if (client->in_state == CLIENT_REQ_COMPLETE) {
+    client->in_state = CLIENT_READING_HEADERS;
+  }
 }
 
 int client_handle_read(int epfd, struct client_state *client) {
-  printf("client_handle_read: reached!\n");
-  struct buffer *buf = client_current_in_buffer(client);
+  printf("client_handle_read: reached! client->in_state = %d\n", client->in_state);
+  struct buffer *buf = &client->in_stream;
   if (!buf) {
     printf("client_handle_read: !buf\n");
     return 0;
@@ -157,7 +129,7 @@ int client_handle_read(int epfd, struct client_state *client) {
     printf("client_handle_read: client->closing = %d\n", client->closing);
     return -1;
   }
-  printf("client_handle_read: "); print_client_in_buffers(client);
+  printf("client_handle_read: "); print_client_in_stream(client);
   printf("client_handle_read: client->fd = %d, buf->len = %ld\n", client->fd, buf->len);
   for (;;) {
     assert(buf->len <= buf->cap);
@@ -185,19 +157,21 @@ int client_handle_read(int epfd, struct client_state *client) {
       return -1;
     }
     buf->len += n;
-    if (client->state == CLIENT_READING_HEADERS) {
+    printf("client_handle_read: "); print_client_in_stream(client);
+    if (client->in_state == CLIENT_REQ_COMPLETE) {
+      printf("client_handle_read: CLIENT_REQ_COMPLETE! advancing...\n");
+      client_adv_in_state(client);
+    }
+    if (client->in_state == CLIENT_READING_HEADERS) {
       ssize_t hdr_end = find_double_crlf(buf->data, buf->len, 0);
       if (hdr_end == -1) continue;
       client->is_http_one_point_o = http_is_one_point_o(client->in_stream.data, client->in_stream.len);
       client->in_header_end = (size_t)hdr_end;
-      client_http_adv_state(client);
-      if (client->state != CLIENT_WRITING_HEADERS) continue;
-      printf("client_handle_read: CLIENT_WRITING_HEADERS "); print_client_in_buffers(client);
+      client_adv_in_state(client);
+      if (client->in_state != CLIENT_REQ_COMPLETE) continue;
       http_build_out_resp(client, hdr_end);
-      printf("client_handle_read: CLIENT_WRITING_HEADERS "); print_client_out_buffers(client);
       if (client->in_url_is_static) {
         buffer_consume(&client->in_stream, hdr_end);
-        client_epoll_switch_state(epfd, client, 1);
         client->in_url_is_static = false;
         continue;
       }
@@ -206,16 +180,9 @@ int client_handle_read(int epfd, struct client_state *client) {
           client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
         );
         buffer_consume(&client->in_stream, hdr_end);
-        client_epoll_switch_state(epfd, client, 1);
         continue;
       }
-    } /*else if (client->state == CLIENT_READING_BODY) {
-      if (client->in_body.len >= client->content_length) {
-        client_http_adv_state(client);
-        client_epoll_switch_state(epfd, client, 1);
-        return;
-      }
-    }*/
+    } //TODO: CLIENT_READING_BODY
   }
   return 1;
 }
@@ -232,13 +199,29 @@ void client_reset_out_streams(struct client_state *c) {
   c->out_body_kind = BODY_BUFFER;
 }
 
+void client_adv_out_state(struct client_state *client) {
+  if (client->out_state == CLIENT_WRITING_HEADERS) {
+    client->out_state = CLIENT_WRITING_BODY;
+  } else if (client->out_state == CLIENT_WRITING_BODY) {
+    client->out_state = CLIENT_RESP_COMPLETE;
+  } else if (client->out_state == CLIENT_RESP_COMPLETE) {
+    client->out_state = CLIENT_WRITING_HEADERS;
+  }
+}
+
 int client_handle_write(int epfd, struct client_state *client) {
+  printf("client_handle_write: called! client->out_state = %d\n", client->closing, client->out_state);
   if (client->closing) return -1;
   for (;;) {
     int rc;
+    if (client->out_state == CLIENT_RESP_COMPLETE) {
+      if (client->is_http_one_point_o) goto fail;
+      client_adv_out_state(client);
+      return 0;
+    }
     if (
-      client->state == CLIENT_WRITING_HEADERS ||
-      client->state == CLIENT_WRITING_BODY
+      client->out_state == CLIENT_WRITING_HEADERS ||
+      client->out_state == CLIENT_WRITING_BODY
     ) {
       printf("client_handle_write: client->out_sent = %ld, client->out_body_kind = %d\n", client->out_sent, client->out_body_kind);
       rc = 1;
@@ -256,7 +239,7 @@ int client_handle_write(int epfd, struct client_state *client) {
           client->out_file_size
         );
       } else {
-        printf("client_handle_write: "); print_client_out_buffers(client);
+        printf("client_handle_write: "); print_client_out_stream(client);
         printf("client_handle_write: client->out_stream.len = %ld\n", client->out_stream.len);
         rc = buffer_send_flat(
           client->fd,
@@ -267,14 +250,9 @@ int client_handle_write(int epfd, struct client_state *client) {
       if (rc < 0) goto fail;
       if (rc == 0) return 0; // EAGAIN → wait
       client_reset_out_streams(client);
-      client_http_adv_state(client);
-      continue;
-    }
-    if (client->state == CLIENT_READING_HEADERS) {
+      client_adv_out_state(client);
       if (client->is_http_one_point_o) goto fail;
-      printf("client_handle_write: client_epoll_switch_state!\n");
-      client_epoll_switch_state(epfd, client, 0);
-      return 0;
+      continue;
     }
     return 0;
   }

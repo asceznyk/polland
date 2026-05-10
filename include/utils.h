@@ -18,9 +18,9 @@ void print_escaped(const char *buf, ssize_t n);
 
 char *str_concat(char* a, char* b);
 
-void print_client_in_buffers(struct client_state *client);
+void print_client_in_stream(struct client_state *client);
 
-void print_client_out_buffers(struct client_state *client);
+void print_client_out_stream(struct client_state *client);
 
 #endif
 
