@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <assert.h>
 
+#include "buffer.h"
 #include "utils.h"
 #include "http.h"
 
@@ -41,6 +42,19 @@ static void test_parse_url_extra_spaces() {
   char *url = http_parse_url(buf);
   assert(url);
   assert(strcmp(url, "/foo/bar") == 0);
+}
+
+static void test_buffer_init() {
+  struct buffer buf = {0};
+  bool ok = buffer_init(&buf, 128);
+  assert(ok);
+  assert(buf.data);
+  assert(buf.len == 0);
+  assert(buf.cap == 128);
+  buffer_free(&buf);
+  assert(buf.data == NULL);
+  assert(buf.len == 0);
+  assert(buf.cap == 0);
 }
 
 int main() {

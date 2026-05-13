@@ -66,7 +66,7 @@ bool client_epoll_register(int epfd, int client_fd) {
   }
   if(!client_init(client, client_fd)) return false;
   struct epoll_event evt = {0};
-  evt.events = EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+  evt.events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
   evt.data.ptr = &client->client_ctx;
   int flags = fcntl(client_fd, F_GETFL, 0);
   fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
@@ -76,6 +76,21 @@ bool client_epoll_register(int epfd, int client_fd) {
     return false;
   }
   return true;
+}
+
+void client_epoll_toggle_write(
+  int epfd, struct client_state *client, bool add_write
+) {
+  printf("client_epoll_toggle_write: fd = %d, add_write = %d\n", client->fd, add_write);
+  struct epoll_event evt = {0};
+  uint32_t events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+  if (add_write) events |= EPOLLOUT;
+  evt.events = events;
+  evt.data.ptr = &client->client_ctx;
+  if (epoll_ctl(epfd, EPOLL_CTL_MOD, client->fd, &evt) < 0) {
+    perror("epoll_ctl MOD");
+    client_mark_closing(client);
+  }
 }
 
 void client_accept_conn(int epfd, int server_fd) {
@@ -173,6 +188,7 @@ int client_handle_read(int epfd, struct client_state *client) {
       if (client->in_url_is_static) {
         buffer_consume(&client->in_stream, hdr_end);
         client->in_url_is_static = false;
+        client_epoll_toggle_write(epfd, client, 1);
         continue;
       }
       if(!client_backend_connect(epfd, client)) {
@@ -180,6 +196,7 @@ int client_handle_read(int epfd, struct client_state *client) {
           client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
         );
         buffer_consume(&client->in_stream, hdr_end);
+        client_epoll_toggle_write(epfd, client, 1);
         continue;
       }
     } //TODO: CLIENT_READING_BODY
@@ -217,6 +234,7 @@ int client_handle_write(int epfd, struct client_state *client) {
     if (client->out_state == CLIENT_RESP_COMPLETE) {
       if (client->is_http_one_point_o) goto fail;
       client_adv_out_state(client);
+      client_epoll_toggle_write(epfd, client, 0);
       return 0;
     }
     if (

@@ -7,6 +7,7 @@
 void backend_init(struct backend_state *backend) {
   backend->fd = -1;
   backend->in_state = BE_CONNECTING;
+  backend->out_state = BE_READING_HEADERS;
   backend->in_has_body = false;
   backend->in_sent = 0;
 }
@@ -87,6 +88,24 @@ bool backend_epoll_register(int epfd, struct client_state *client) {
   return true;
 }
 
+static void backend_epoll_toggle_write(
+  int epfd,
+  struct client_state *client,
+  bool add_write
+) {
+  printf("backend_epoll_add_write: add_write = %d\n", add_write);
+  struct backend_state *backend = &client->backend;
+  struct epoll_event evt = {0};
+  uint32_t events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+  if (add_write) events |= EPOLLOUT;
+  evt.events = events;
+  evt.data.ptr = &client->backend_ctx;
+  if (epoll_ctl(epfd, EPOLL_CTL_MOD, backend->fd, &evt) < 0) {
+    perror("epoll_ctl backend MOD");
+    backend_close(epfd, &client->backend);
+  }
+}
+
 void backend_close(int epfd, struct backend_state *backend) {
   if (backend->fd == -1) return;
   printf("backend_close: closing backend with backend_fd = %d\n", backend->fd);
@@ -107,9 +126,9 @@ int backend_handle_err(int epfd, struct client_state *client) {
     http_build_err_resp(
       client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
     );
-    buffer_consume(&client->in_stream, strlen(client->in_stream.data));
+    buffer_consume(&client->in_stream, client->in_stream.len);
     client->out_state = CLIENT_WRITING_HEADERS;
-    client_handle_write(epfd, client);
+    client_epoll_toggle_write(epfd, client, 1);
   }
   return -1;
 }
@@ -150,7 +169,7 @@ int backend_handle_read(int epfd, struct client_state *client) {
     if (n == 0) {
       printf("backend_handle_read: n == 0! Stopping.\n");
       backend_close(epfd, backend);
-      client_handle_write(epfd, client);
+      client_epoll_toggle_write(epfd, client, 1);
       return 0;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -160,10 +179,7 @@ int backend_handle_read(int epfd, struct client_state *client) {
     client_mark_closing(client);
     return -1;
   }
-  if (client->out_stream.len > 0) {
-    printf("backend_handle_read: client->out_stream.len = %ld! client_handle_write!\n", client->out_stream.len);
-    client_handle_write(epfd, client);
-  }
+  if (client->out_stream.len > 0) client_epoll_toggle_write(epfd, client, 1);
   return 0;
 }
 
@@ -199,6 +215,7 @@ int backend_handle_write(int epfd, struct client_state *client) {
     }
     if (backend->in_state == BE_REQ_COMPLETE) {
       backend_adv_in_state(backend);
+      backend_epoll_toggle_write(epfd, client, 0);
       return 0;
     }
     if (

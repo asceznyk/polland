@@ -60,7 +60,7 @@ void client_mark_closing(struct client_state *client);
 
 void client_destroy(int epfd, struct client_state *client);
 
-void client_epoll_switch_state(
+void client_epoll_toggle_write(
   int epfd, struct client_state *client, bool add_write
 );
 
