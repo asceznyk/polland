@@ -15,7 +15,6 @@
 
 #include "defs.h"
 #include "buffer.h"
-#include "backend.h"
 #include "fd_ctx.h"
 
 enum body_kind {
@@ -23,6 +22,8 @@ enum body_kind {
   BODY_BUFFER,
   BODY_FILE
 };
+
+struct backend_state;
 
 struct client_state {
   int fd;
@@ -39,9 +40,8 @@ struct client_state {
   int out_file_fd;
   size_t out_file_size;
   off_t out_file_offset;
-  struct backend_state backend;
-  struct fd_ctx client_ctx;
-  struct fd_ctx backend_ctx;
+  struct backend_state *backend;
+  struct fd_ctx ctx;
   enum {
     CLIENT_READING_HEADERS,
     CLIENT_READING_BODY,

@@ -7,7 +7,8 @@ struct fd_ctx {
     FD_CLIENT,
     FD_BACKEND
   } kind;
-  struct client_state *client;
+  //struct client_state *client;
+  void *peer;
 };
 
 #endif

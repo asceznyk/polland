@@ -1,3 +1,4 @@
+#include "defs.h"
 #include "buffer.h"
 
 bool buffer_init(struct buffer *buf, size_t cap) {

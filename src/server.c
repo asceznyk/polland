@@ -76,37 +76,54 @@ int main() {
         continue;
       }
       struct fd_ctx *ctx = sevents[i].data.ptr;
-      printf("main: ctx->kind = %d, ctx->closing = %d, ctx->client.fd = %d\n", ctx->kind, ctx->closing, ctx->client->fd);
-      struct client_state *client = ctx->client;
-      if (client->closing) {
-        printf("main: client %d marked as closing!\n", client->fd);
+      printf("main: ctx->kind = %d, ctx->closing = %d\n", ctx->kind, ctx->closing);
+      if (ctx->closing) {
+        printf("main: ctx marked as closing!\n");
         continue;
       }
       int dead = 0;
+      int from_backend = 0;
       if (events & (EPOLLERR | EPOLLHUP)) {
         printf("main: EPOLLERR | EPOLLHUP\n");
-        dead = 1;
-        if (ctx->kind == FD_BACKEND) backend_handle_err(epfd, client);
-        else client_mark_closing(client);
-        continue;
-      }
-      if (ctx->kind == FD_CLIENT) {
+        if (ctx->kind == FD_BACKEND) {
+          struct backend_state *backend = (struct backend_state *)ctx->peer;
+          backend_handle_err(epfd, backend);
+        } else {
+          struct client_state *client = (struct client_state *)ctx->peer;
+          client_mark_closing(client);
+          dead = 1;
+        }
+      } else if (ctx->kind == FD_CLIENT) {
+        struct client_state *client = (struct client_state *)ctx->peer;
         if (events & (EPOLLIN | EPOLLRDHUP)) {
           if (client_handle_read(epfd, client) < 0) dead = 1;
         }
         if (events & EPOLLOUT) {
           if (client_handle_write(epfd, client) < 0) dead = 1;
-          printf("main: client_handle_write done!\n");
         }
       } else if (ctx->kind == FD_BACKEND) {
+        struct backend_state *backend = (struct backend_state *)ctx->peer;
         if (events & (EPOLLIN | EPOLLHUP)) {
-          if (backend_handle_read(epfd, client) < 0) dead = 1;
+          if (backend_handle_read(epfd, backend) < 0) {
+            dead = 1;
+            from_backend = 1;
+          }
         }
         if (events & EPOLLOUT) {
-          if (backend_handle_write(epfd, client) < 0) dead = 1;
+          if(backend_handle_write(epfd, backend) < 0) {
+            dead = 1;
+            from_backend = 1;
+          }
         }
       }
       if (dead) {
+        struct client_state *client = NULL;
+        if (from_backend) {
+          struct backend_state *backend = (struct backend_state *)ctx->peer;
+          client = backend->client;
+          if (client->closing) continue;
+          printf("main: from_backend accessing client = %d\n", client->fd);
+        } else client = (struct client_state *)ctx->peer;
         client->next_to_free = free_head;
         free_head = client;
       }

@@ -22,6 +22,7 @@ YYJSON_SRC := 3rdparty/yyjson/src/yyjson.c
 
 SRC_BIN  := $(OUT_DIR)/rgnx
 TEST_BIN := $(OUT_DIR)/test
+MOCK_CLIENT_BIN := $(OUT_DIR)/mock_client
 
 all: $(SRC_BIN)
 
@@ -58,10 +59,14 @@ $(SRC_BIN): $(SRC_OBJS) $(YYJSON_LIB)
 $(TEST_BIN): $(LIB_OBJS) $(TEST_OBJS) $(YYJSON_LIB)
 	$(CC) $(CFLAGS) -o $@ $(LIB_OBJS) $(TEST_OBJS) -L$(YYJSON_BUILD_DIR) -lyyjson
 
+$(MOCK_CLIENT_BIN): mock/client.c | $(OUT_DIR)
+	$(CC) -Wall -Wextra -g -O0 -pthread $< -o $@
+
 test: $(TEST_BIN)
 	./$(TEST_BIN)
 
-.PHONY: clean
+mock_client: $(MOCK_CLIENT_BIN)
+
+.PHONY: clean mock_client
 clean:
 	rm -rf $(OUT_DIR)
-

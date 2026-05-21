@@ -10,11 +10,15 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 
+#include "fd_ctx.h"
+
 struct client_state;
 
 struct backend_state {
   int fd;
   bool in_has_body;
+  struct client_state *client;
+  struct fd_ctx ctx;
   enum {
     BE_CONNECTING,
     BE_WRITING_HEADERS,
@@ -31,17 +35,28 @@ struct backend_state {
 
 void backend_init(struct backend_state *backend);
 
-void backend_close(int epfd, struct backend_state *backend);
+void backend_destroy(int epfd, struct backend_state *backend);
 
-int backend_connect(struct backend_state *backend, const char *ip, uint16_t port);
+int backend_connect(const char *ip, uint16_t port);
 
-bool backend_epoll_register(int epfd, struct client_state *client);
+bool backend_epoll_register(int epfd, int fd, struct client_state *client);
 
-int backend_handle_err(int epfd, struct client_state *client);
+void backend_epoll_toggle_write(
+  int epfd,
+  struct backend_state *backend,
+  bool add_write
+);
 
-int backend_handle_read(int epfd, struct client_state *client);
+void backend_detach_client(
+  struct client_state *client,
+  struct backend_state *backend
+);
 
-int backend_handle_write(int epfd, struct client_state *client);
+int backend_handle_err(int epfd, struct backend_state *backend);
+
+int backend_handle_read(int epfd, struct backend_state *backend);
+
+int backend_handle_write(int epfd, struct backend_state *backend);
 
 #endif
 

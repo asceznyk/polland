@@ -10,8 +10,6 @@
 #include <sys/socket.h>
 #include <sys/sendfile.h>
 
-#include "defs.h"
-
 struct buffer {
   char *data;
   size_t len;
