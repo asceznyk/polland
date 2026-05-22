@@ -229,8 +229,8 @@ void http_build_static_out(
 void http_build_out_resp(struct client_state *client, size_t hdr_end) {
   struct buffer *in_stream = &client->in_stream;
   char tmp[BUFFER_SIZE];
-  memcpy(tmp, in_stream->data, in_stream->len);
-  tmp[in_stream->len] = '\0';
+  memcpy(tmp, in_stream->data, hdr_end);
+  tmp[hdr_end] = '\0';
   char *url = http_parse_url(tmp);
   if (strncmp(url, server_cfg.static_prefix, strlen(server_cfg.static_prefix)) == 0) {
     client->in_url_is_static = true;

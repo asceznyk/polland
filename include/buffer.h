@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <assert.h>
 #include <sys/socket.h>
 #include <sys/sendfile.h>
 
@@ -24,7 +25,7 @@ void buffer_consume(struct buffer *buf, size_t n);
 
 int buffer_append(struct buffer *buf, const void *src, size_t n);
 
-int buffer_send_flat(int fd, struct buffer *buf, size_t *sent);
+int buffer_send_flat(int fd, struct buffer *buf, size_t len, size_t *sent);
 
 int buffer_send_file(int sock_fd, int file_fd, off_t *offset, size_t file_size);
 

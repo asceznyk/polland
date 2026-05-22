@@ -2,6 +2,7 @@
 #include "buffer.h"
 
 bool buffer_init(struct buffer *buf, size_t cap) {
+  printf("buffer_init: reached\n");
   buf->data = cap ? malloc(cap) : NULL;
   if (cap && !buf->data) return false;
   buf->len = 0;
@@ -41,10 +42,11 @@ int buffer_append(struct buffer *buf, const void *src, size_t n) {
 }
 
 int buffer_send_flat(
-  int fd, struct buffer *buf, size_t *sent
+  int fd, struct buffer *buf, size_t len, size_t *sent
 ) {
-  while (*sent < buf->len) {
-    size_t remaining = buf->len - *sent;
+  assert(len <= buf->len);
+  while (*sent < len) {
+    size_t remaining = len - *sent;
     size_t to_send = remaining < BUFFER_SIZE ? remaining : BUFFER_SIZE;
     ssize_t n = send(fd, buf->data + *sent, to_send, 0);
     if (n > 0) {

@@ -220,6 +220,7 @@ void backend_adv_in_state(struct backend_state *backend) {
 int backend_handle_write(int epfd, struct backend_state *backend) {
   printf("backend_handle_write: reached!\n");
   struct client_state *client = backend->client;
+  printf("backend_handle_write: client->req_len = %ld\n", client->req_len);
   if (client->closing) {
     printf("backend_handle_write: client->fd = %d closing...\n", client->fd);
     return -1;
@@ -248,6 +249,7 @@ int backend_handle_write(int epfd, struct backend_state *backend) {
       rc = buffer_send_flat(
         backend->fd,
         &client->in_stream,
+        client->req_len,
         &backend->in_sent
       );
       if (rc < 0) goto fail;

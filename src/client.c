@@ -5,6 +5,7 @@
 #include "http.h"
 
 void client_io_buffers_free(struct client_state *client) {
+  printf("client_io_buffers_free: reached\n");
   buffer_free(&client->in_stream);
   buffer_free(&client->out_stream);
 }
@@ -13,6 +14,7 @@ bool client_init(struct client_state *client, int fd) {
   *client = (struct client_state) {
     .fd = fd,
     .closing = false,
+    .req_len = 0,
     .in_state = CLIENT_READING_HEADERS,
     .out_state = CLIENT_WRITING_HEADERS,
     .in_has_body = false,
@@ -22,6 +24,7 @@ bool client_init(struct client_state *client, int fd) {
   };
   if (!buffer_init(&client->in_stream, BUFFER_SIZE)) goto fail;
   if (!buffer_init(&client->out_stream, BUFFER_SIZE)) goto fail;
+  printf("client_init: inited buffers!\n");
   client->ctx.closing = false;
   client->ctx.kind = FD_CLIENT;
   client->ctx.peer = client;
@@ -130,18 +133,55 @@ void client_adv_in_state(struct client_state *client) {
   }
 }
 
-int client_handle_read(int epfd, struct client_state *client) {
-  printf("client_handle_read: reached! client->in_state = %d\n", client->in_state);
+int client_process_in_stream(int epfd, struct client_state *client) {
   struct buffer *buf = &client->in_stream;
-  if (!buf) {
-    printf("client_handle_read: !buf\n");
-    return 0;
-  };
-  if (client->closing) {
-    printf("client_handle_read: client->closing = %d\n", client->closing);
-    return -1;
+  size_t bytes_read = 0;
+  size_t len_buf = buf->len;
+  printf("client_process_in_stream: before_loop: bytes_read = %ld, len_buf = %ld\n", bytes_read, len_buf);
+  while (bytes_read <= len_buf) {
+    if (client->in_state == CLIENT_REQ_COMPLETE) {
+      printf("client_process_in_stream: CLIENT_REQ_COMPLETE! advancing...\n");
+      client_adv_in_state(client);
+      break;
+    }
+    if (client->in_state == CLIENT_READING_HEADERS) {
+      ssize_t hdr_end = find_double_crlf(buf->data, buf->len, 0);
+      if (hdr_end == -1) break;
+      client_adv_in_state(client);
+      client->req_len = (size_t)hdr_end;
+      bytes_read += client->req_len;
+      if (client->in_state != CLIENT_REQ_COMPLETE) continue;
+      client->is_http_one_point_o = http_is_one_point_o(
+        client->in_stream.data, client->req_len
+      );
+      http_build_out_resp(client, client->req_len);
+      if (client->in_url_is_static) {
+        buffer_consume(&client->in_stream, client->req_len);
+        client->in_url_is_static = false;
+        continue;
+      }
+      if (!client_backend_connect(epfd, client)) {
+        http_build_err_resp(
+          client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
+        );
+        buffer_consume(&client->in_stream, client->req_len);
+      }
+    } //TODO: CLIENT_READING_BODY
   }
-  printf("client_handle_read: client->fd = %d, buf->len = %ld\n", client->fd, buf->len);
+  printf("client_process_in_stream: after_loop: bytes_read = %ld\n", bytes_read);
+  client_epoll_toggle_write(epfd, client, 1);
+  return 0;
+}
+
+bool client_response_busy(struct client_state *client) {
+  return client->out_stream.len > 0 && client->out_state == CLIENT_WRITING_HEADERS;
+}
+
+int client_handle_read(int epfd, struct client_state *client) {
+  printf("client_handle_read: reached!\n");
+  struct buffer *buf = &client->in_stream;
+  if (!buf) return 0;
+  if (client->closing) return -1;
   for (;;) {
     assert(buf->len <= buf->cap);
     ssize_t n = recv(
@@ -162,40 +202,13 @@ int client_handle_read(int epfd, struct client_state *client) {
         continue;
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         printf("client_handle_read: EAGAIN\n");
-        return 0;
+        return client_process_in_stream(epfd, client);
       }
       client_mark_closing(client);
       return -1;
     }
     buf->len += n;
     printf("client_handle_read: "); print_client_in_stream(client);
-    if (client->in_state == CLIENT_REQ_COMPLETE) {
-      printf("client_handle_read: CLIENT_REQ_COMPLETE! advancing...\n");
-      client_adv_in_state(client);
-    }
-    if (client->in_state == CLIENT_READING_HEADERS) {
-      ssize_t hdr_end = find_double_crlf(buf->data, buf->len, 0);
-      if (hdr_end == -1) continue;
-      client->is_http_one_point_o = http_is_one_point_o(client->in_stream.data, client->in_stream.len);
-      client->in_header_end = (size_t)hdr_end;
-      client_adv_in_state(client);
-      if (client->in_state != CLIENT_REQ_COMPLETE) continue;
-      http_build_out_resp(client, hdr_end);
-      if (client->in_url_is_static) {
-        buffer_consume(&client->in_stream, hdr_end);
-        client->in_url_is_static = false;
-        client_epoll_toggle_write(epfd, client, 1);
-        continue;
-      }
-      if (!client_backend_connect(epfd, client)) {
-        http_build_err_resp(
-          client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
-        );
-        buffer_consume(&client->in_stream, hdr_end);
-        client_epoll_toggle_write(epfd, client, 1);
-        continue;
-      }
-    } //TODO: CLIENT_READING_BODY
   }
   return 1;
 }
@@ -230,6 +243,9 @@ int client_handle_write(int epfd, struct client_state *client) {
     if (client->out_state == CLIENT_RESP_COMPLETE) {
       if (client->is_http_one_point_o) goto fail;
       client_adv_out_state(client);
+      if (!client->is_http_one_point_o && client->in_stream.len > 0) {
+        return client_process_in_stream(epfd, client);
+      }
       client_epoll_toggle_write(epfd, client, 0);
       return 0;
     }
@@ -242,7 +258,12 @@ int client_handle_write(int epfd, struct client_state *client) {
       if (client->out_body_kind == BODY_FILE) {
         printf("client_handle_write:  CLIENT_WRITING_BODY, BODY_FILE \n");
         printf("client_handle_write: client->out_file_fd = %d\n", client->out_file_fd);
-        rc = buffer_send_flat(client->fd, &client->out_stream, &client->out_sent);
+        rc = buffer_send_flat(
+          client->fd,
+          &client->out_stream,
+          client->out_stream.len,
+          &client->out_sent
+        );
         if (rc < 0) goto fail;
         if (rc == 0) return 0;
         printf("client_handle_write: client->out_sent = %ld\n", client->out_sent);
@@ -258,6 +279,7 @@ int client_handle_write(int epfd, struct client_state *client) {
         rc = buffer_send_flat(
           client->fd,
           &client->out_stream,
+          client->out_stream.len,
           &client->out_sent
         );
       }
