@@ -4,14 +4,14 @@
 #include "client.h"
 #include "http.h"
 
-void client_io_buffers_free(struct client_state *client) {
+void client_io_buffers_free(client_t *client) {
   printf("client_io_buffers_free: reached\n");
   buffer_free(&client->in_stream);
   buffer_free(&client->out_stream);
 }
 
-bool client_init(struct client_state *client, int fd) {
-  *client = (struct client_state) {
+bool client_init(client_t *client, int fd) {
+  *client = (client_t) {
     .fd = fd,
     .closing = false,
     .req_len = 0,
@@ -34,14 +34,14 @@ bool client_init(struct client_state *client, int fd) {
     return false;
 }
 
-void client_mark_closing(struct client_state *client) {
+void client_mark_closing(client_t *client) {
   printf("client_mark_closing: client->fd = %d\n", client->fd);
   if (client->ctx.closing || client->closing) return;
   client->ctx.closing = true;
   client->closing = true;
 }
 
-void client_destroy(int epfd, struct client_state *client) {
+void client_destroy(int epfd, client_t *client) {
   printf("client_destroy: reached\n");
   if (client->fd != -1) {
     printf("client_destroy: closing client->fd = %d!\n", client->fd);
@@ -51,7 +51,7 @@ void client_destroy(int epfd, struct client_state *client) {
   }
   if (client->backend && client->backend->fd != -1) {
     printf("client_destroy: has a backend! destroying backend\n");
-    struct backend_state *backend = client->backend;
+    backend_t *backend = client->backend;
     backend_detach_client(client, backend);
     backend_destroy(epfd, backend);
   }
@@ -61,7 +61,7 @@ void client_destroy(int epfd, struct client_state *client) {
 }
 
 bool client_epoll_register(int epfd, int fd) {
-  struct client_state *client = calloc(1, sizeof(*client));
+  client_t *client = malloc(sizeof(*client));
   if(!client) {
     close(fd);
     return false;
@@ -81,7 +81,7 @@ bool client_epoll_register(int epfd, int fd) {
 }
 
 void client_epoll_toggle_write(
-  int epfd, struct client_state *client, bool add_write
+  int epfd, client_t *client, bool add_write
 ) {
   printf("client_epoll_toggle_write: fd = %d, add_write = %d\n", client->fd, add_write);
   struct epoll_event evt = {0};
@@ -109,7 +109,7 @@ void client_accept_conn(int epfd, int server_fd) {
   }
 }
 
-bool client_backend_connect(int epfd, struct client_state *client) {
+bool client_backend_connect(int epfd, client_t *client) {
   if (client->backend && client->backend->fd != 0) {
     backend_epoll_toggle_write(epfd, client->backend, 1);
     return true;
@@ -121,7 +121,7 @@ bool client_backend_connect(int epfd, struct client_state *client) {
   return backend_epoll_register(epfd, fd, client);
 }
 
-void client_adv_in_state(struct client_state *client) {
+void client_adv_in_state(client_t *client) {
   if (client->in_state == CLIENT_READING_HEADERS) {
     client->in_state = client->in_has_body ?
       CLIENT_READING_BODY :
@@ -133,7 +133,7 @@ void client_adv_in_state(struct client_state *client) {
   }
 }
 
-int client_process_in_stream(int epfd, struct client_state *client) {
+int client_process_in_stream(int epfd, client_t *client) {
   struct buffer *buf = &client->in_stream;
   size_t bytes_read = 0;
   size_t len_buf = buf->len;
@@ -173,11 +173,11 @@ int client_process_in_stream(int epfd, struct client_state *client) {
   return 0;
 }
 
-bool client_response_busy(struct client_state *client) {
+bool client_response_busy(client_t *client) {
   return client->out_stream.len > 0 && client->out_state == CLIENT_WRITING_HEADERS;
 }
 
-int client_handle_read(int epfd, struct client_state *client) {
+int client_handle_read(int epfd, client_t *client) {
   printf("client_handle_read: reached!\n");
   struct buffer *buf = &client->in_stream;
   if (!buf) return 0;
@@ -213,7 +213,7 @@ int client_handle_read(int epfd, struct client_state *client) {
   return 1;
 }
 
-void client_reset_out_streams(struct client_state *c) {
+void client_reset_out_streams(client_t *c) {
   c->out_stream.len = 0;
   c->out_sent = 0;
   if (c->out_file_fd != -1) {
@@ -225,7 +225,7 @@ void client_reset_out_streams(struct client_state *c) {
   c->out_body_kind = BODY_BUFFER;
 }
 
-void client_adv_out_state(struct client_state *client) {
+void client_adv_out_state(client_t *client) {
   if (client->out_state == CLIENT_WRITING_HEADERS) {
     client->out_state = CLIENT_WRITING_BODY;
   } else if (client->out_state == CLIENT_WRITING_BODY) {
@@ -235,7 +235,7 @@ void client_adv_out_state(struct client_state *client) {
   }
 }
 
-int client_handle_write(int epfd, struct client_state *client) {
+int client_handle_write(int epfd, client_t *client) {
   printf("client_handle_write: called!\n");
   if (client->closing) return -1;
   for (;;) {
@@ -243,6 +243,7 @@ int client_handle_write(int epfd, struct client_state *client) {
     if (client->out_state == CLIENT_RESP_COMPLETE) {
       if (client->is_http_one_point_o) goto fail;
       client_adv_out_state(client);
+      printf("client_handle_write: client->in_stream.len = %ld\n", client->in_stream.len);
       if (!client->is_http_one_point_o && client->in_stream.len > 0) {
         return client_process_in_stream(epfd, client);
       }

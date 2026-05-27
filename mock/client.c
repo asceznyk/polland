@@ -226,16 +226,13 @@ static int connect_to_endpoint(const struct endpoint *endpoint) {
   struct addrinfo hints = {0};
   struct addrinfo *result = NULL;
   int sock = -1;
-
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-
   int rc = getaddrinfo(endpoint->host, endpoint->port, &hints, &result);
   if (rc != 0) {
     fprintf(stderr, "getaddrinfo(%s:%s): %s\n", endpoint->host, endpoint->port, gai_strerror(rc));
     return -1;
   }
-
   for (struct addrinfo *rp = result; rp != NULL; rp = rp->ai_next) {
     sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
     if (sock < 0)
@@ -245,7 +242,6 @@ static int connect_to_endpoint(const struct endpoint *endpoint) {
     close(sock);
     sock = -1;
   }
-
   freeaddrinfo(result);
   return sock;
 }
@@ -286,7 +282,6 @@ static int send_request_for_endpoint(
     }
     return send_all(sock, request, (size_t)written);
   }
-
   char request_line[1200];
   int written = snprintf(request_line, sizeof(request_line), "GET %s HTTP/1.1\r\n", endpoint->path);
   if (written < 0 || written >= (int)sizeof(request_line)) {
@@ -296,7 +291,6 @@ static int send_request_for_endpoint(
   if (send_all(sock, request_line, (size_t)written) < 0)
     return -1;
   usleep(delay_us);
-
   char host_line[384];
   written = snprintf(host_line, sizeof(host_line), "Host: %s\r\n", endpoint->host_header);
   if (written < 0 || written >= (int)sizeof(host_line)) {
@@ -306,7 +300,6 @@ static int send_request_for_endpoint(
   if (send_all(sock, host_line, (size_t)written) < 0)
     return -1;
   usleep(delay_us);
-
   char connection_line[64];
   written = snprintf(connection_line, sizeof(connection_line), "Connection: %s\r\n", connection);
   if (written < 0 || written >= (int)sizeof(connection_line)) {
@@ -316,7 +309,6 @@ static int send_request_for_endpoint(
   if (send_all(sock, connection_line, (size_t)written) < 0)
     return -1;
   usleep(delay_us);
-
   if (send_all(sock, "User-Agent: mock\r\n\r\n", strlen("User-Agent: mock\r\n\r\n")) < 0)
     return -1;
   usleep(delay_us);

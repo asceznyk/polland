@@ -63,7 +63,7 @@ int main() {
   struct epoll_event sevents[MAX_EVENTS];
   int flags = fcntl(server_fd, F_GETFL, 0);
   fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
-  struct client_state *free_head = NULL;
+  client_t *free_head = NULL;
   while (running) {
     printf("main: epoll_wait?!\n");
     int n = epoll_wait(epfd, sevents, MAX_EVENTS, -1);
@@ -86,15 +86,15 @@ int main() {
       if (events & (EPOLLERR | EPOLLHUP)) {
         printf("main: EPOLLERR | EPOLLHUP\n");
         if (ctx->kind == FD_BACKEND) {
-          struct backend_state *backend = (struct backend_state *)ctx->peer;
+          backend_t *backend = (backend_t *)ctx->peer;
           backend_handle_err(epfd, backend);
         } else {
-          struct client_state *client = (struct client_state *)ctx->peer;
+          client_t *client = (client_t *)ctx->peer;
           client_mark_closing(client);
           dead = 1;
         }
       } else if (ctx->kind == FD_CLIENT) {
-        struct client_state *client = (struct client_state *)ctx->peer;
+        client_t *client = (client_t *)ctx->peer;
         if (events & (EPOLLIN | EPOLLRDHUP)) {
           if (client_handle_read(epfd, client) < 0) dead = 1;
         }
@@ -102,7 +102,7 @@ int main() {
           if (client_handle_write(epfd, client) < 0) dead = 1;
         }
       } else if (ctx->kind == FD_BACKEND) {
-        struct backend_state *backend = (struct backend_state *)ctx->peer;
+        backend_t *backend = (backend_t *)ctx->peer;
         if (events & (EPOLLIN | EPOLLHUP)) {
           if (backend_handle_read(epfd, backend) < 0) {
             dead = 1;
@@ -117,20 +117,20 @@ int main() {
         }
       }
       if (dead) {
-        struct client_state *client = NULL;
+        client_t *client = NULL;
         if (from_backend) {
-          struct backend_state *backend = (struct backend_state *)ctx->peer;
+          backend_t *backend = (backend_t *)ctx->peer;
           client = backend->client;
           if (client->closing) continue;
           printf("main: from_backend accessing client = %d\n", client->fd);
-        } else client = (struct client_state *)ctx->peer;
+        } else client = (client_t *)ctx->peer;
         client->next_to_free = free_head;
         free_head = client;
       }
     }
     while (free_head) {
       printf("main: freeing client fd = %d!\n", free_head->fd);
-      struct client_state *next = free_head->next_to_free;
+      client_t *next = free_head->next_to_free;
       client_destroy(epfd, free_head);
       free_head = next;
     }

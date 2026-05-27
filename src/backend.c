@@ -5,7 +5,7 @@
 #include "config.h"
 #include "buffer.h"
 
-void backend_init(struct backend_state *backend) {
+void backend_init(backend_t *backend) {
   backend->client = NULL;
   backend->in_state = BE_CONNECTING;
   backend->out_state = BE_READING_HEADERS;
@@ -61,17 +61,17 @@ int backend_connect(const char *ip, uint16_t port) {
 }
 
 static void backend_attach_client(
-  struct client_state *client,
-  struct backend_state *backend
+  client_t *client,
+  backend_t *backend
 ) {
   printf("backend_attach_client: attaching!\n");
   client->backend = backend;
   backend->client = client;
 }
 
-bool backend_epoll_register(int epfd, int fd, struct client_state *client) {
+bool backend_epoll_register(int epfd, int fd, client_t *client) {
   printf("backend_epoll_register: reached!\n");
-  struct backend_state *backend = calloc(1, sizeof(*backend));
+  backend_t *backend = malloc(sizeof(*backend));
   if (!backend || fd < 0) {
     close(fd);
     return false;
@@ -101,7 +101,7 @@ bool backend_epoll_register(int epfd, int fd, struct client_state *client) {
 
 void backend_epoll_toggle_write(
   int epfd,
-  struct backend_state *backend,
+  backend_t *backend,
   bool add_write
 ) {
   printf("backend_epoll_toggle_write: add_write = %d\n", add_write);
@@ -116,15 +116,15 @@ void backend_epoll_toggle_write(
 }
 
 void backend_detach_client(
-  struct client_state *client,
-  struct backend_state *backend
+  client_t *client,
+  backend_t *backend
 ) {
   printf("backend_detach_client: detached!\n");
   client->backend = NULL;
   backend->client = NULL;
 }
 
-void backend_destroy(int epfd, struct backend_state *backend) {
+void backend_destroy(int epfd, backend_t *backend) {
   if (backend->fd == -1) return;
   printf("backend_destroy: closing backend with backend_fd = %d\n", backend->fd);
   epoll_ctl(epfd, EPOLL_CTL_DEL, backend->fd, NULL);
@@ -133,8 +133,8 @@ void backend_destroy(int epfd, struct backend_state *backend) {
   free(backend);
 }
 
-int backend_handle_err(int epfd, struct backend_state *backend) {
-  struct client_state *client = backend->client;
+int backend_handle_err(int epfd, backend_t *backend) {
+  client_t *client = backend->client;
   if (backend->in_state == BE_CONNECTING) {
     int err = 0;
     socklen_t len = sizeof(err);
@@ -143,7 +143,7 @@ int backend_handle_err(int epfd, struct backend_state *backend) {
     http_build_err_resp(
       client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
     );
-    buffer_consume(&client->in_stream, client->in_stream.len);
+    buffer_consume(&client->in_stream, client->req_len);
     client->out_state = CLIENT_WRITING_HEADERS;
     backend_detach_client(client, backend);
     backend_destroy(epfd, backend);
@@ -152,7 +152,7 @@ int backend_handle_err(int epfd, struct backend_state *backend) {
   return -1;
 }
 
-void backend_adv_out_state(struct backend_state *backend) {
+void backend_adv_out_state(backend_t *backend) {
   if (backend->out_state == BE_READING_HEADERS) {
     backend->out_state = BE_READING_BODY;
   } else if (backend->out_state == BE_READING_BODY) {
@@ -162,9 +162,9 @@ void backend_adv_out_state(struct backend_state *backend) {
   }
 }
 
-int backend_handle_read(int epfd, struct backend_state *backend) {
+int backend_handle_read(int epfd, backend_t *backend) {
   printf("backend_handle_read: reached!\n");
-  struct client_state *client = backend->client;
+  client_t *client = backend->client;
   if (client->closing) return -1;
   int fd = backend->fd;
   struct buffer *dst = &client->out_stream;
@@ -203,7 +203,7 @@ int backend_handle_read(int epfd, struct backend_state *backend) {
   return 0;
 }
 
-void backend_adv_in_state(struct backend_state *backend) {
+void backend_adv_in_state(backend_t *backend) {
   if (backend->in_state == BE_CONNECTING) {
     backend->in_state = BE_WRITING_HEADERS;
   } else if (backend->in_state == BE_WRITING_HEADERS) {
@@ -217,9 +217,9 @@ void backend_adv_in_state(struct backend_state *backend) {
   }
 }
 
-int backend_handle_write(int epfd, struct backend_state *backend) {
+int backend_handle_write(int epfd, backend_t *backend) {
   printf("backend_handle_write: reached!\n");
-  struct client_state *client = backend->client;
+  client_t *client = backend->client;
   printf("backend_handle_write: client->req_len = %ld\n", client->req_len);
   if (client->closing) {
     printf("backend_handle_write: client->fd = %d closing...\n", client->fd);

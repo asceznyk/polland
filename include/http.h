@@ -27,13 +27,12 @@ enum http_method http_parse_method(char *buf, size_t hdr_end);
 char *http_parse_url(char *buf);
 
 void http_build_err_resp(
-  struct client_state *client,
+  client_t *client,
   const char *err_header,
   const char *err_body,
   bool is_head
 );
 
-void http_build_out_resp(struct client_state *client, size_t hdr_end);
+void http_build_out_resp(client_t *client, size_t hdr_end);
 
 #endif
-

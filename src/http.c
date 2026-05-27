@@ -140,7 +140,7 @@ int http_open_static_path(char *url) {
 }
 
 void http_build_static_response(
-  struct client_state *client, char *url, int file_fd, bool is_head
+  client_t *client, char *url, int file_fd, bool is_head
 ) {
   const char *mime_type = NULL;
   printf("http_build_static_response: url = %s\n", url);
@@ -187,7 +187,7 @@ void http_fill_buffer(struct buffer *buf, const char *fill_buf) {
 }
 
 void http_build_err_resp(
-  struct client_state *client,
+  client_t *client,
   const char *err_header,
   const char *err_body,
   bool is_head
@@ -198,7 +198,7 @@ void http_build_err_resp(
 }
 
 void http_fill_static_resp_get(
-  struct client_state *client, char *url, bool is_head
+  client_t *client, char *url, bool is_head
 ) {
   client->out_body_kind = is_head ? BODY_NONE : BODY_BUFFER;
   int file_fd = http_open_static_path(url);
@@ -213,7 +213,7 @@ void http_fill_static_resp_get(
 }
 
 void http_build_static_out(
-  struct client_state *client, size_t hdr_end, char *url
+  client_t *client, size_t hdr_end, char *url
 ) {
   struct buffer *in_stream = &client->in_stream;
   enum http_method method = http_parse_method(in_stream->data, hdr_end);
@@ -226,7 +226,7 @@ void http_build_static_out(
   );
 }
 
-void http_build_out_resp(struct client_state *client, size_t hdr_end) {
+void http_build_out_resp(client_t *client, size_t hdr_end) {
   struct buffer *in_stream = &client->in_stream;
   char tmp[BUFFER_SIZE];
   memcpy(tmp, in_stream->data, hdr_end);
@@ -244,5 +244,4 @@ void http_build_out_resp(struct client_state *client, size_t hdr_end) {
     client, NOT_IMPLEMENTED_HEADER, NOT_IMPLEMENTED_BODY, false
   );
 }
-
 

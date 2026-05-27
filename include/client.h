@@ -23,12 +23,13 @@ enum body_kind {
   BODY_FILE
 };
 
-struct backend_state;
+typedef struct backend_t backend_t;
+typedef struct client_t client_t;
 
-struct client_state {
+struct client_t {
   int fd;
   bool closing;
-  struct client_state *next_to_free;
+  client_t *next_to_free;
   size_t req_len;
   bool is_http_one_point_o;
   bool in_has_body;
@@ -41,7 +42,7 @@ struct client_state {
   int out_file_fd;
   size_t out_file_size;
   off_t out_file_offset;
-  struct backend_state *backend;
+  backend_t *backend;
   struct fd_ctx ctx;
   enum {
     CLIENT_READING_HEADERS,
@@ -57,21 +58,19 @@ struct client_state {
 
 void client_accept_conn(int epfd, int server_fd);
 
-void client_mark_closing(struct client_state *client);
+void client_mark_closing(client_t *client);
 
-void client_destroy(int epfd, struct client_state *client);
+void client_destroy(int epfd, client_t *client);
 
 void client_epoll_toggle_write(
-  int epfd, struct client_state *client, bool add_write
+  int epfd, client_t *client, bool add_write
 );
 
-void client_http_adv_state(struct client_state *client);
+void client_http_adv_state(client_t *client);
 
-int client_handle_read(int epfd, struct client_state *client);
+int client_handle_read(int epfd, client_t *client);
 
-int client_handle_write(int epfd, struct client_state *client);
+int client_handle_write(int epfd, client_t *client);
 
 #endif
-
-
 
