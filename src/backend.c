@@ -5,12 +5,21 @@
 #include "config.h"
 #include "buffer.h"
 
-void backend_init(backend_t *backend) {
+int backend_entry_count = 0;
+int backend_idle_count = 0;
+
+backend_t *backend_registry[MAX_UPSTREAM_CONNECTIONS];
+
+void backend_init(backend_t *backend, int fd) {
+  backend->fd = fd;
   backend->client = NULL;
   backend->in_state = BE_CONNECTING;
   backend->out_state = BE_READING_HEADERS;
   backend->in_has_body = false;
   backend->in_sent = 0;
+  backend->ctx.closing = false;
+  backend->ctx.kind = FD_BACKEND;
+  backend->ctx.peer = backend;
 }
 
 int backend_connect(const char *ip, uint16_t port) {
@@ -60,7 +69,55 @@ int backend_connect(const char *ip, uint16_t port) {
   return fd;
 }
 
-static void backend_attach_client(
+backend_t *backend_create(int fd) {
+  backend_t *backend = malloc(sizeof(*backend));
+  if (!backend || fd < 0) {
+    close(fd);
+    return NULL;
+  }
+  backend_registry[backend_entry_count++] = backend;
+  backend_init(backend, fd);
+  return backend;
+}
+
+backend_t *backend_build_pool(int k) {
+  assert(k >= 0);
+  backend_t *start = NULL;
+  backend_t *prev = NULL;
+  while (k--) {
+    int fd = -1;
+    if((
+      fd = backend_connect(server_cfg.upstream.host, server_cfg.upstream.port)
+    ) < 0) return NULL;
+    backend_t *curr = backend_create(fd);
+    if (!curr) return start;
+    curr->prev = prev;
+    curr->next = NULL;
+    if (prev) prev->next = curr;
+    else start = curr;
+    prev = curr;
+    backend_idle_count++;
+  }
+  return start;
+}
+
+void backend_detach_from_pool(backend_t **head, backend_t *entry) {
+  if (entry->prev) entry->prev->next = entry->next;
+  else *head = entry->next;
+  if (entry->next) entry->next->prev = entry->prev;
+  entry->next = NULL;
+  entry->prev = NULL;
+  backend_idle_count--;
+}
+
+void backend_attach_to_pool(backend_t *head, backend_t *entry) {
+  entry->next = head;
+  entry->prev = NULL;
+  entry->next->prev = entry;
+  backend_idle_count++;
+}
+
+void backend_attach_client(
   client_t *client,
   backend_t *backend
 ) {
@@ -69,18 +126,7 @@ static void backend_attach_client(
   backend->client = client;
 }
 
-bool backend_epoll_register(int epfd, int fd, client_t *client) {
-  printf("backend_epoll_register: reached!\n");
-  backend_t *backend = malloc(sizeof(*backend));
-  if (!backend || fd < 0) {
-    close(fd);
-    return false;
-  }
-  backend->fd = fd;
-  backend_init(backend);
-  backend->ctx.closing = false;
-  backend->ctx.kind = FD_BACKEND;
-  backend->ctx.peer = backend;
+bool backend_epoll_register(int epfd, backend_t *backend) {
   printf("backend_epoll_register: backend_fd = %d\n", backend->fd);
   int flags = fcntl(backend->fd, F_GETFL, 0);
   if (flags < 0 || fcntl(backend->fd, F_SETFL, flags | O_NONBLOCK) < 0) {
@@ -95,7 +141,6 @@ bool backend_epoll_register(int epfd, int fd, client_t *client) {
     close(backend->fd);
     return false;
   }
-  backend_attach_client(client, backend);
   return true;
 }
 

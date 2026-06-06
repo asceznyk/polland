@@ -14,6 +14,7 @@
 static atomic_bool running = 1;
 
 void handle_interrupt(int sig) {
+  printf("handle_interrupt: signal recieved %d\n", sig);
   printf("handle_interrupt: SIGINT/SIGTERM recieved, stopping the server..\n");
   running = 0;
 }
@@ -49,7 +50,7 @@ int main() {
     perror("failed bind to socket address\n");
     exit(EXIT_FAILURE);
   }
-  if(listen(server_fd, NUM_BACKLOG) < 0) {
+  if(listen(server_fd, MAX_BACKLOG) < 0) {
     perror("failed to listen!\n");
     exit(EXIT_FAILURE);
   }

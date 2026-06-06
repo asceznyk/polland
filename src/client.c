@@ -60,18 +60,22 @@ void client_destroy(int epfd, client_t *client) {
   free(client);
 }
 
-bool client_epoll_register(int epfd, int fd) {
+client_t *client_create(int fd) {
   client_t *client = malloc(sizeof(*client));
   if(!client) {
     close(fd);
-    return false;
+    return NULL;
   }
-  if(!client_init(client, fd)) return false;
+  if(!client_init(client, fd)) return NULL;
+  return client;
+}
+
+bool client_epoll_register(int epfd, client_t *client) {
   struct epoll_event evt = {0};
   evt.events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
-  evt.data.ptr = &client->ctx; //&client->client_ctx;
-  int flags = fcntl(fd, F_GETFL, 0);
-  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  evt.data.ptr = &client->ctx;
+  int flags = fcntl(client->fd, F_GETFL, 0);
+  fcntl(client->fd, F_SETFL, flags | O_NONBLOCK);
   if (epoll_ctl(epfd, EPOLL_CTL_ADD, client->fd, &evt) < 0) {
     perror("epoll_ctl");
     client_mark_closing(client);
@@ -88,7 +92,7 @@ void client_epoll_toggle_write(
   uint32_t events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
   if (add_write) events |= EPOLLOUT;
   evt.events = events;
-  evt.data.ptr = &client->ctx; //&client->client_ctx;
+  evt.data.ptr = &client->ctx;
   if (epoll_ctl(epfd, EPOLL_CTL_MOD, client->fd, &evt) < 0) {
     perror("epoll_ctl MOD");
     client_mark_closing(client);
@@ -97,15 +101,17 @@ void client_epoll_toggle_write(
 
 void client_accept_conn(int epfd, int server_fd) {
   for (;;) {
-    int client_fd = accept(server_fd, NULL, NULL);
-    if (client_fd < 0) {
+    int fd = accept(server_fd, NULL, NULL);
+    if (fd < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK)
         break;
       else
         perror("accept");
       break;
     }
-    if (!client_epoll_register(epfd, client_fd)) break;
+    client_t *client = client_create(fd);
+    if (!client) break;
+    if (!client_epoll_register(epfd, client)) break;
   }
 }
 
@@ -118,7 +124,9 @@ bool client_backend_connect(int epfd, client_t *client) {
   if((
     fd = backend_connect(server_cfg.upstream.host, server_cfg.upstream.port)
   ) < 0) return false;
-  return backend_epoll_register(epfd, fd, client);
+  backend_t *backend = backend_create(fd);
+  backend_attach_client(client, backend);
+  return backend_epoll_register(epfd, backend);
 }
 
 void client_adv_in_state(client_t *client) {

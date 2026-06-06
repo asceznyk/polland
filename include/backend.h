@@ -7,13 +7,18 @@
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <assert.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 
+#include "defs.h"
 #include "fd_ctx.h"
 
 typedef struct client_t client_t;
 typedef struct backend_t backend_t;
+
+extern int backend_entry_count;
+extern int backend_idle_count;
 
 struct backend_t {
   int fd;
@@ -32,20 +37,27 @@ struct backend_t {
     BE_RESP_COMPLETE
   } out_state;
   size_t in_sent;
+  struct backend_t *next;
+  struct backend_t *prev;
 };
 
-void backend_init(backend_t *backend);
+backend_t *backend_create(int fd);
 
 void backend_destroy(int epfd, backend_t *backend);
 
 int backend_connect(const char *ip, uint16_t port);
 
-bool backend_epoll_register(int epfd, int fd, client_t *client);
+bool backend_epoll_register(int epfd, backend_t *backend);
 
 void backend_epoll_toggle_write(
   int epfd,
   backend_t *backend,
   bool add_write
+);
+
+void backend_attach_client(
+  client_t *client,
+  backend_t *backend_t
 );
 
 void backend_detach_client(
