@@ -245,3 +245,45 @@ void http_build_out_resp(client_t *client, size_t hdr_end) {
   );
 }
 
+ssize_t http_get_content_length(struct buffer *buf) {
+  const char *headers_end = buf->data;
+  size_t pos = (size_t)find_double_crlf(buf->data, buf->len, 0);
+  headers_end = headers_end + pos;
+  const char *p = buf->data;
+  while (p < headers_end) {
+    const char *line_end = p;
+    while (
+      line_end < headers_end &&
+      !(line_end[0] == '\r' && line_end[1] == '\n')
+    ) {
+      line_end++;
+    }
+    size_t line_len = line_end - p;
+    if (
+      line_len >= 15 &&
+      strncasecmp(p, "Content-Length:", 15) == 0
+    ) {
+      const char *v = p + 15;
+      while (v < line_end && (*v == ' ' || *v == '\t'))
+        v++;
+      ssize_t content_length = 0;
+      while (v < line_end && isdigit((unsigned char)*v)) {
+        content_length = content_length * 10 + (*v - '0');
+        v++;
+      }
+      return content_length;
+    }
+    p = line_end + 2;
+  }
+  return -1;
+}
+
+bool http_is_resp_complete(struct buffer *buf) {
+  size_t len = buf->len;
+  char *data = buf->data;
+  char *start = memmem(data, len, "\r\n\r\n", 4) + 4;
+  size_t body_length = (data+len) - start;
+  size_t content_length = (size_t)http_get_content_length(buf);
+  return (content_length > 0 && content_length >= body_length);
+}
+

@@ -18,12 +18,13 @@ typedef struct client_t client_t;
 typedef struct backend_t backend_t;
 
 extern int backend_entry_count;
-extern int backend_idle_count;
 
 struct backend_t {
   int fd;
+  bool closing;
   bool in_has_body;
   client_t *client;
+  backend_t *next_to_free;
   struct fd_ctx ctx;
   enum {
     BE_CONNECTING,
@@ -37,11 +38,24 @@ struct backend_t {
     BE_RESP_COMPLETE
   } out_state;
   size_t in_sent;
+  int ridx;
   struct backend_t *next;
   struct backend_t *prev;
 };
 
+extern backend_t *backend_pool;
+
+extern backend_t *backend_registry[MAX_UPSTREAM_CONNECTIONS];
+
+void backend_show_registry();
+
 backend_t *backend_create(int fd);
+
+backend_t *backend_build_pool(int epfd, int k);
+
+backend_t *backend_detach_from_pool();
+
+void backend_attach_to_pool(backend_t *entry);
 
 void backend_destroy(int epfd, backend_t *backend);
 

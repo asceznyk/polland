@@ -14,6 +14,7 @@ bool client_init(client_t *client, int fd) {
   *client = (client_t) {
     .fd = fd,
     .closing = false,
+    .req_id = -1,
     .req_len = 0,
     .in_state = CLIENT_READING_HEADERS,
     .out_state = CLIENT_WRITING_HEADERS,
@@ -50,10 +51,8 @@ void client_destroy(int epfd, client_t *client) {
     client->fd = -1;
   }
   if (client->backend && client->backend->fd != -1) {
-    printf("client_destroy: has a backend! destroying backend\n");
     backend_t *backend = client->backend;
     backend_detach_client(client, backend);
-    backend_destroy(epfd, backend);
   }
   client_io_buffers_free(client);
   client->ctx.peer = NULL;
@@ -115,18 +114,47 @@ void client_accept_conn(int epfd, int server_fd) {
   }
 }
 
-bool client_backend_connect(int epfd, client_t *client) {
-  if (client->backend && client->backend->fd != 0) {
+bool client_setup_backend(int epfd, backend_t **backend) {
+  int fd = backend_connect(
+    server_cfg.upstream.host,
+    server_cfg.upstream.port
+  );
+  if (fd < 0)
+    return false;
+  if (*backend == NULL) {
+    *backend = backend_create(fd);
+    if (*backend == NULL) {
+      close(fd);
+      return false;
+    }
+  } else {
+    (*backend)->fd = fd;
+  }
+  return backend_epoll_register(epfd, *backend);
+}
+
+bool client_borrow_backend(int epfd, client_t *client) {
+  printf("client_borrow_backend: reached!\n");
+  if (client->backend) {
+    printf("client_borrow_backend: HAS EXISTTING BACKEND!\n");
     backend_epoll_toggle_write(epfd, client->backend, 1);
     return true;
   }
-  int fd = -1;
-  if((
-    fd = backend_connect(server_cfg.upstream.host, server_cfg.upstream.port)
-  ) < 0) return false;
-  backend_t *backend = backend_create(fd);
+  backend_t *backend = NULL;
+  printf("client_borrow_backend: backend_pool = %p\n", backend_pool);
+  if (!backend_pool) {
+    if (!client_setup_backend(epfd, &backend)) return false;
+  } else {
+    backend = backend_detach_from_pool();
+    printf("client_borrow_backend: backend->fd = %d\n", backend->fd);
+    if (backend->fd == -1) {
+      if (!client_setup_backend(epfd, &backend)) return false;
+    }
+  }
+  printf("client_borrow_backend: backend = %p\n", backend);
   backend_attach_client(client, backend);
-  return backend_epoll_register(epfd, backend);
+  backend_epoll_toggle_write(epfd, backend, 1);
+  return true;
 }
 
 void client_adv_in_state(client_t *client) {
@@ -145,11 +173,12 @@ int client_process_in_stream(int epfd, client_t *client) {
   struct buffer *buf = &client->in_stream;
   size_t bytes_read = 0;
   size_t len_buf = buf->len;
-  printf("client_process_in_stream: before_loop: bytes_read = %ld, len_buf = %ld\n", bytes_read, len_buf);
+  printf("client_process_in_stream: len_buf = %ld\n", len_buf);
   while (bytes_read <= len_buf) {
     if (client->in_state == CLIENT_REQ_COMPLETE) {
       printf("client_process_in_stream: CLIENT_REQ_COMPLETE! advancing...\n");
       client_adv_in_state(client);
+      client->req_id = ++client_req_count;
       break;
     }
     if (client->in_state == CLIENT_READING_HEADERS) {
@@ -165,24 +194,19 @@ int client_process_in_stream(int epfd, client_t *client) {
       http_build_out_resp(client, client->req_len);
       if (client->in_url_is_static) {
         buffer_consume(&client->in_stream, client->req_len);
-        client->in_url_is_static = false;
+        client_epoll_toggle_write(epfd, client, 1);
         continue;
       }
-      if (!client_backend_connect(epfd, client)) {
+      if (!client_borrow_backend(epfd, client)) {
         http_build_err_resp(
           client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
         );
         buffer_consume(&client->in_stream, client->req_len);
+        client_epoll_toggle_write(epfd, client, 1);
       }
     } //TODO: CLIENT_READING_BODY
   }
-  printf("client_process_in_stream: after_loop: bytes_read = %ld\n", bytes_read);
-  client_epoll_toggle_write(epfd, client, 1);
   return 0;
-}
-
-bool client_response_busy(client_t *client) {
-  return client->out_stream.len > 0 && client->out_state == CLIENT_WRITING_HEADERS;
 }
 
 int client_handle_read(int epfd, client_t *client) {
@@ -221,16 +245,16 @@ int client_handle_read(int epfd, client_t *client) {
   return 1;
 }
 
-void client_reset_out_streams(client_t *c) {
-  c->out_stream.len = 0;
-  c->out_sent = 0;
-  if (c->out_file_fd != -1) {
-    close(c->out_file_fd);
-    c->out_file_fd = -1;
+void client_reset_out_streams(client_t *client) {
+  client->out_stream.len = 0;
+  client->out_sent = 0;
+  if (client->out_file_fd != -1) {
+    close(client->out_file_fd);
+    client->out_file_fd = -1;
   }
-  c->out_file_offset = 0;
-  c->out_file_size = 0;
-  c->out_body_kind = BODY_BUFFER;
+  client->out_file_offset = 0;
+  client->out_file_size = 0;
+  client->out_body_kind = BODY_BUFFER;
 }
 
 void client_adv_out_state(client_t *client) {
@@ -249,12 +273,12 @@ int client_handle_write(int epfd, client_t *client) {
   for (;;) {
     int rc;
     if (client->out_state == CLIENT_RESP_COMPLETE) {
-      if (client->is_http_one_point_o) goto fail;
+      printf("client_handle_write: client->req_id = %d\n", client->req_id);
       client_adv_out_state(client);
-      printf("client_handle_write: client->in_stream.len = %ld\n", client->in_stream.len);
-      if (!client->is_http_one_point_o && client->in_stream.len > 0) {
+      if (client->is_http_one_point_o) goto fail;
+      if (client->in_url_is_static) client->in_url_is_static = false;
+      if (client->in_stream.len > 0)
         return client_process_in_stream(epfd, client);
-      }
       client_epoll_toggle_write(epfd, client, 0);
       return 0;
     }

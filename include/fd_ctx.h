@@ -8,6 +8,7 @@ struct fd_ctx {
     FD_BACKEND
   } kind;
   void *peer;
+  int fd;
 };
 
 #endif

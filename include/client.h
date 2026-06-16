@@ -26,8 +26,11 @@ enum body_kind {
 typedef struct backend_t backend_t;
 typedef struct client_t client_t;
 
+extern int client_req_count;
+
 struct client_t {
   int fd;
+  int req_id;
   bool closing;
   client_t *next_to_free;
   size_t req_len;
