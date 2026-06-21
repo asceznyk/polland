@@ -41,12 +41,12 @@ void print_escaped(const char *buf, ssize_t n) {
 }
 
 void print_client_in_stream(client_t *client) {
-  struct buffer *in_stream = &client->in_stream;
+  buffer_t *in_stream = &client->in_stream;
   printf("in_stream = "); print_escaped(in_stream->data, in_stream->len);
 }
 
 void print_client_out_stream(client_t *client) {
-  struct buffer *out_stream = &client->out_stream;
+  buffer_t *out_stream = &client->out_stream;
   printf("out_stream = "); print_escaped(out_stream->data, out_stream->len);
 }
 

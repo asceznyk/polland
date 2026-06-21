@@ -23,6 +23,7 @@ backend_t *backend_pool = NULL;
 int client_req_count = 0;
 
 int main() {
+  signal(SIGPIPE, SIG_IGN);
   server_cfg = config_parse_file("config/rgnx.json");
   signal(SIGINT, handle_interrupt);
   signal(SIGTERM, handle_interrupt);
@@ -73,7 +74,8 @@ int main() {
   while (running) {
     printf("main: epoll_wait?!\n");
     int n = epoll_wait(epfd, sevents, MAX_EVENTS, -1);
-    printf("main: "); backend_show_registry();
+    printf("main: backend_entry_count = %d ", backend_entry_count);
+    backend_show_registry();
     free_client_head = NULL;
     printf("main: n = %d\n", n);
     for (int i = 0; i < n; i++) {
@@ -90,32 +92,30 @@ int main() {
         continue;
       }
       int dead_client = 0, dead_backend = 0;
-      if (events & (EPOLLERR | EPOLLHUP)) {
-        printf("main: EPOLLERR | EPOLLHUP\n");
-        if (ctx->kind == FD_BACKEND) {
-          backend_t *backend = (backend_t *)ctx->peer;
-          backend_handle_err(epfd, backend);
-          //dead_backend = 1;
-        } else {
-          client_t *client = (client_t *)ctx->peer;
-          client_mark_closing(client);
-          dead_client = 1;
-        }
-      } else if (ctx->kind == FD_CLIENT) {
+      printf("main: events = 0x%x\n", events);
+      if (ctx->kind == FD_CLIENT) {
         client_t *client = (client_t *)ctx->peer;
-        if (events & (EPOLLIN | EPOLLRDHUP)) {
+        if (events & (EPOLLIN | EPOLLHUP | EPOLLRDHUP)) {
           if (client_handle_read(epfd, client) < 0) dead_client = 1;
         }
         if (events & EPOLLOUT) {
           if (client_handle_write(epfd, client) < 0) dead_client = 1;
         }
+        if (events & EPOLLERR) {
+          client_mark_closing(client);
+          dead_client = 1;
+        }
       } else if (ctx->kind == FD_BACKEND) {
         backend_t *backend = (backend_t *)ctx->peer;
-        if (events & (EPOLLIN | EPOLLHUP)) {
+        if (events & (EPOLLIN | EPOLLHUP | EPOLLRDHUP)) {
           if (backend_handle_read(epfd, backend) < 0) dead_backend = 1;
         }
         if (events & EPOLLOUT) {
           if(backend_handle_write(epfd, backend) < 0) dead_backend = 1;
+        }
+        if (events & EPOLLERR) {
+          backend_handle_err(epfd, backend);
+          dead_backend = 1;
         }
       }
       if (dead_client) {
@@ -141,6 +141,7 @@ int main() {
       backend_destroy(epfd, free_backend_head);
       free_backend_head = next;
     }
+    if (!backend_entry_count) backend_pool = NULL;
     printf("main: end of iteration!\n");
   }
   printf("main: closing all clients and main server thread...\n");

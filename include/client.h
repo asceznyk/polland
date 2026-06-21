@@ -32,14 +32,13 @@ struct client_t {
   int fd;
   int req_id;
   bool closing;
-  client_t *next_to_free;
   size_t req_len;
   bool is_http_one_point_o;
   bool in_has_body;
   bool in_url_is_static;
   size_t in_header_end;
-  struct buffer in_stream;
-  struct buffer out_stream;
+  buffer_t in_stream;
+  buffer_t out_stream;
   size_t out_sent;
   enum body_kind out_body_kind;
   int out_file_fd;
@@ -57,6 +56,7 @@ struct client_t {
     CLIENT_WRITING_BODY,
     CLIENT_RESP_COMPLETE
   } out_state;
+  client_t *next_to_free;
 };
 
 void client_accept_conn(int epfd, int server_fd);

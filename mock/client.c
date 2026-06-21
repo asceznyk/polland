@@ -8,12 +8,14 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 #define DEFAULT_CHUNK_DELAY_US 200000
 #define DEFAULT_NUM_CLIENTS 100
 #define DEFAULT_EXPECTED_RESPONSES 3
 #define DEFAULT_URL "http://127.0.0.1:6969/"
 #define BUFFER_BYTES_PER_RESPONSE 8192
+#define DEFAULT_RECV_TIMEOUT_SEC 5
 #define MAX_URLS 64
 
 enum client_mode {
@@ -345,6 +347,15 @@ static void *client_thread(void *arg) {
     return NULL;
   }
   printf("[client %d] connected\n", id);
+  struct timeval timeout = {
+    .tv_sec = DEFAULT_RECV_TIMEOUT_SEC,
+    .tv_usec = 0,
+  };
+  if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+    perror("setsockopt(SO_RCVTIMEO)");
+    close(sock);
+    return NULL;
+  }
   int send_rc = send_requests(sock, config);
   if (send_rc < 0) {
     close(sock);
@@ -371,23 +382,46 @@ static void *client_thread(void *arg) {
       break;
     }
   }
-  if (n < 0)
-    perror("recv");
+  if (n < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      fprintf(stderr, "[client %d] ERROR: receive timeout\n", id);
+    else
+      perror("recv");
+    free(buffer);
+    close(sock);
+    return NULL;
+  }
+  if (n == 0 && responses != total_expected_responses(config)) {
+    fprintf(
+      stderr,
+      "[client %d] ERROR: connection closed after %d/%d responses\n",
+      id,
+      responses,
+      total_expected_responses(config)
+    );
+    free(buffer);
+    close(sock);
+    return NULL;
+  }
   buffer[total] = '\0';
   printf("\n==============================\n");
   printf("[client %d] FULL RESPONSE (%ld bytes):\n", id, total);
   printf("%s\n", buffer);
   printf("==============================\n");
-  printf("[client %d] received %d responses (expected %d)\n",
-         id,
-         responses,
-         total_expected_responses(config));
+  printf(
+    "[client %d] received %d responses (expected %d)\n",
+    id,
+    responses,
+    total_expected_responses(config)
+  );
   if (responses != total_expected_responses(config)) {
-    fprintf(stderr,
-            "[client %d] ERROR: expected %d responses but got %d\n",
-            id,
-            total_expected_responses(config),
-            responses);
+    fprintf(
+      stderr,
+      "[client %d] ERROR: expected %d responses but got %d\n",
+      id,
+      total_expected_responses(config),
+      responses
+    );
     free(buffer);
     close(sock);
     abort();
@@ -418,6 +452,6 @@ int main(int argc, char **argv) {
     pthread_join(threads[i], NULL);
   free(threads);
   free(thread_args);
-  printf("All clients completed successfully.\n");
   return 0;
 }
+

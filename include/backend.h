@@ -24,7 +24,6 @@ struct backend_t {
   bool closing;
   bool in_has_body;
   client_t *client;
-  backend_t *next_to_free;
   struct fd_ctx ctx;
   enum {
     BE_CONNECTING,
@@ -39,8 +38,9 @@ struct backend_t {
   } out_state;
   size_t in_sent;
   int ridx;
-  struct backend_t *next;
-  struct backend_t *prev;
+  backend_t *next;
+  backend_t *prev;
+  backend_t *next_to_free;
 };
 
 extern backend_t *backend_pool;

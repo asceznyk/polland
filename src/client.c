@@ -56,6 +56,7 @@ void client_destroy(int epfd, client_t *client) {
   }
   client_io_buffers_free(client);
   client->ctx.peer = NULL;
+  printf("client_destroy: destroying %p!\n", client);
   free(client);
 }
 
@@ -71,7 +72,7 @@ client_t *client_create(int fd) {
 
 bool client_epoll_register(int epfd, client_t *client) {
   struct epoll_event evt = {0};
-  evt.events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+  evt.events = EPOLLET | EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
   evt.data.ptr = &client->ctx;
   int flags = fcntl(client->fd, F_GETFL, 0);
   fcntl(client->fd, F_SETFL, flags | O_NONBLOCK);
@@ -88,7 +89,7 @@ void client_epoll_toggle_write(
 ) {
   printf("client_epoll_toggle_write: fd = %d, add_write = %d\n", client->fd, add_write);
   struct epoll_event evt = {0};
-  uint32_t events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+  uint32_t events = EPOLLET | EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
   if (add_write) events |= EPOLLOUT;
   evt.events = events;
   evt.data.ptr = &client->ctx;
@@ -115,6 +116,7 @@ void client_accept_conn(int epfd, int server_fd) {
 }
 
 bool client_setup_backend(int epfd, backend_t **backend) {
+  printf("client_setup_backend!\n");
   int fd = backend_connect(
     server_cfg.upstream.host,
     server_cfg.upstream.port
@@ -170,7 +172,8 @@ void client_adv_in_state(client_t *client) {
 }
 
 int client_process_in_stream(int epfd, client_t *client) {
-  struct buffer *buf = &client->in_stream;
+  if (client->backend) return 0;
+  buffer_t *buf = &client->in_stream;
   size_t bytes_read = 0;
   size_t len_buf = buf->len;
   printf("client_process_in_stream: len_buf = %ld\n", len_buf);
@@ -211,7 +214,7 @@ int client_process_in_stream(int epfd, client_t *client) {
 
 int client_handle_read(int epfd, client_t *client) {
   printf("client_handle_read: reached!\n");
-  struct buffer *buf = &client->in_stream;
+  buffer_t *buf = &client->in_stream;
   if (!buf) return 0;
   if (client->closing) return -1;
   for (;;) {
@@ -268,7 +271,7 @@ void client_adv_out_state(client_t *client) {
 }
 
 int client_handle_write(int epfd, client_t *client) {
-  printf("client_handle_write: called!\n");
+  printf("client_handle_write: %p!\n", client);
   if (client->closing) return -1;
   for (;;) {
     int rc;
@@ -277,8 +280,12 @@ int client_handle_write(int epfd, client_t *client) {
       client_adv_out_state(client);
       if (client->is_http_one_point_o) goto fail;
       if (client->in_url_is_static) client->in_url_is_static = false;
-      if (client->in_stream.len > 0)
+      printf("client_handle_write: client->in_stream.len = %ld\n", client->in_stream.len);
+      if (!client->backend && client->in_stream.len > 0) {
+        assert(client->backend == NULL);
+        assert(client->out_stream.len == 0);
         return client_process_in_stream(epfd, client);
+      }
       client_epoll_toggle_write(epfd, client, 0);
       return 0;
     }

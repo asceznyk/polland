@@ -35,6 +35,6 @@ void http_build_err_resp(
 
 void http_build_out_resp(client_t *client, size_t hdr_end);
 
-bool http_is_resp_complete(struct buffer *buf);
+bool http_is_resp_complete(buffer_t *buf);
 
 #endif

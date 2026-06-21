@@ -1,7 +1,7 @@
 #include "defs.h"
 #include "buffer.h"
 
-bool buffer_init(struct buffer *buf, size_t cap) {
+bool buffer_init(buffer_t *buf, size_t cap) {
   printf("buffer_init: reached\n");
   buf->data = cap ? malloc(cap) : NULL;
   if (cap && !buf->data) return false;
@@ -10,12 +10,12 @@ bool buffer_init(struct buffer *buf, size_t cap) {
   return true;
 }
 
-void buffer_free(struct buffer *buf) {
+void buffer_free(buffer_t *buf) {
   free(buf->data);
-  *buf = (struct buffer){0};
+  *buf = (buffer_t){0};
 }
 
-void buffer_consume(struct buffer *buf, size_t n) {
+void buffer_consume(buffer_t *buf, size_t n) {
   if (n == 0) return;
   if (n >= buf->len) {
     buf->len = 0;
@@ -25,7 +25,7 @@ void buffer_consume(struct buffer *buf, size_t n) {
   buf->len -= n;
 }
 
-int buffer_append(struct buffer *buf, const void *src, size_t n) {
+int buffer_append(buffer_t *buf, const void *src, size_t n) {
   if (n == 0) return 0;
   if (buf->len + n > buf->cap) {
     size_t new_cap = buf->cap ? buf->cap : 1;
@@ -42,8 +42,9 @@ int buffer_append(struct buffer *buf, const void *src, size_t n) {
 }
 
 int buffer_send_flat(
-  int fd, struct buffer *buf, size_t len, size_t *sent
+  int fd, buffer_t *buf, size_t len, size_t *sent
 ) {
+  printf("buffer_send_flat: %p\n", buf);
   assert(len <= buf->len);
   while (*sent < len) {
     size_t remaining = len - *sent;

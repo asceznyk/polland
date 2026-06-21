@@ -168,7 +168,7 @@ void http_build_static_response(
       "\r\n",
     mime_type, (size_t)content_len
   );
-  struct buffer *out_stream = &client->out_stream;
+  buffer_t *out_stream = &client->out_stream;
   memcpy(out_stream->data, header, (size_t)header_len);
   out_stream->len = header_len;
   if (is_head) {
@@ -180,7 +180,7 @@ void http_build_static_response(
   client->out_file_size = (size_t)content_len;
 }
 
-void http_fill_buffer(struct buffer *buf, const char *fill_buf) {
+void http_fill_buffer(buffer_t *buf, const char *fill_buf) {
   size_t n = strlen(fill_buf);
   buf->len = n;
   memcpy(buf->data, fill_buf, n);
@@ -215,7 +215,7 @@ void http_fill_static_resp_get(
 void http_build_static_out(
   client_t *client, size_t hdr_end, char *url
 ) {
-  struct buffer *in_stream = &client->in_stream;
+  buffer_t *in_stream = &client->in_stream;
   enum http_method method = http_parse_method(in_stream->data, hdr_end);
   if (method == M_HEAD || method == M_GET) {
     http_fill_static_resp_get(client, url, (method == M_HEAD));
@@ -227,7 +227,7 @@ void http_build_static_out(
 }
 
 void http_build_out_resp(client_t *client, size_t hdr_end) {
-  struct buffer *in_stream = &client->in_stream;
+  buffer_t *in_stream = &client->in_stream;
   char tmp[BUFFER_SIZE];
   memcpy(tmp, in_stream->data, hdr_end);
   tmp[hdr_end] = '\0';
@@ -245,7 +245,7 @@ void http_build_out_resp(client_t *client, size_t hdr_end) {
   );
 }
 
-ssize_t http_get_content_length(struct buffer *buf) {
+ssize_t http_get_content_length(buffer_t *buf) {
   const char *headers_end = buf->data;
   size_t pos = (size_t)find_double_crlf(buf->data, buf->len, 0);
   headers_end = headers_end + pos;
@@ -278,12 +278,14 @@ ssize_t http_get_content_length(struct buffer *buf) {
   return -1;
 }
 
-bool http_is_resp_complete(struct buffer *buf) {
-  size_t len = buf->len;
-  char *data = buf->data;
-  char *start = memmem(data, len, "\r\n\r\n", 4) + 4;
-  size_t body_length = (data+len) - start;
-  size_t content_length = (size_t)http_get_content_length(buf);
-  return (content_length > 0 && content_length >= body_length);
+bool http_is_resp_complete(buffer_t *buf) {
+  char *hdr = memmem(buf->data, buf->len, "\r\n\r\n", 4);
+  if (!hdr)
+    return false;
+  ssize_t content_length = http_get_content_length(buf);
+  if (content_length < 0)
+    return false;
+  size_t body_length = buf->len - (hdr + 4 - buf->data);
+  return body_length >= (size_t)content_length;
 }
 

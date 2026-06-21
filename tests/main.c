@@ -45,7 +45,7 @@ static void test_parse_url_extra_spaces() {
 }
 
 static void test_buffer_init() {
-  struct buffer buf = {0};
+  buffer_t buf = {0};
   bool ok = buffer_init(&buf, 128);
   assert(ok);
   assert(buf.data);
