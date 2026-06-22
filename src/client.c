@@ -14,6 +14,7 @@ bool client_init(client_t *client, int fd) {
   *client = (client_t) {
     .fd = fd,
     .closing = false,
+    .is_connection_close = false,
     .req_id = -1,
     .req_len = 0,
     .in_state = CLIENT_READING_HEADERS,
@@ -51,6 +52,7 @@ void client_destroy(int epfd, client_t *client) {
     client->fd = -1;
   }
   if (client->backend && client->backend->fd != -1) {
+    printf("client_destroy: backend present %p\n", client->backend);
     backend_t *backend = client->backend;
     backend_detach_client(client, backend);
   }
@@ -189,6 +191,8 @@ int client_process_in_stream(int epfd, client_t *client) {
       if (hdr_end == -1) break;
       client_adv_in_state(client);
       client->req_len = (size_t)hdr_end;
+      if (http_is_connection_close(&client->in_stream, client->req_len))
+        client->is_connection_close = true;
       bytes_read += client->req_len;
       if (client->in_state != CLIENT_REQ_COMPLETE) continue;
       client->is_http_one_point_o = http_is_one_point_o(
@@ -278,7 +282,7 @@ int client_handle_write(int epfd, client_t *client) {
     if (client->out_state == CLIENT_RESP_COMPLETE) {
       printf("client_handle_write: client->req_id = %d\n", client->req_id);
       client_adv_out_state(client);
-      if (client->is_http_one_point_o) goto fail;
+      if (client->is_connection_close || client->is_http_one_point_o) goto fail;
       if (client->in_url_is_static) client->in_url_is_static = false;
       printf("client_handle_write: client->in_stream.len = %ld\n", client->in_stream.len);
       if (!client->backend && client->in_stream.len > 0) {

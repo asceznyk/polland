@@ -120,24 +120,24 @@ int main() {
       }
       if (dead_client) {
         client_t *client = (client_t *)ctx->peer;
-        client->next_to_free = free_client_head;
+        client->free_head = free_client_head;
         free_client_head = client;
       }
       if (dead_backend) {
         backend_t *backend = (backend_t *)ctx->peer;
-        backend->next_to_free = free_backend_head;
+        backend->free_head = free_backend_head;
         free_backend_head = backend;
       }
     }
     while (free_client_head) {
       printf("main: freeing client fd = %d!\n", free_client_head->fd);
-      client_t *next = free_client_head->next_to_free;
+      client_t *next = free_client_head->free_head;
       client_destroy(epfd, free_client_head);
       free_client_head = next;
     }
     while (free_backend_head) {
       printf("main: freeing backend fd = %d!\n", free_backend_head->fd);
-      backend_t *next = free_backend_head->next_to_free;
+      backend_t *next = free_backend_head->free_head;
       backend_destroy(epfd, free_backend_head);
       free_backend_head = next;
     }

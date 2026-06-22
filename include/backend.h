@@ -40,7 +40,7 @@ struct backend_t {
   int ridx;
   backend_t *next;
   backend_t *prev;
-  backend_t *next_to_free;
+  backend_t *free_head;
 };
 
 extern backend_t *backend_pool;

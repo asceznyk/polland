@@ -40,7 +40,6 @@ const char *BAD_GATEWAY_HEADER =
   "HTTP/1.1 502 Bad Gateway\r\n"
   "Content-Type: text/html\r\n"
   "Content-Length: 106\r\n"
-  "Connection: close\r\n"
   "\r\n";
 
 const char *BAD_GATEWAY_BODY =
@@ -287,5 +286,37 @@ bool http_is_resp_complete(buffer_t *buf) {
     return false;
   size_t body_length = buf->len - (hdr + 4 - buf->data);
   return body_length >= (size_t)content_length;
+}
+
+char *http_get_connection_value(buffer_t *buf, size_t req_len) {
+  char *end = buf->data + req_len;
+  char *p = buf->data;
+  while (p < end) {
+    char *line_end = p;
+    while (line_end + 1 < end && !(line_end[0] == '\r' && line_end[1] == '\n'))
+      line_end++;
+    if (line_end - p >= 11 && strncasecmp(p, "Connection:", 11) == 0) {
+      char *v = p + 11;
+      while (v < line_end && (*v == ' ' || *v == '\t')) v++;
+      char *v_end = line_end;
+      while (
+        v_end > v &&
+        (v_end[-1] == '\r' || v_end[-1] == '\n' || v_end[-1] == ' ' || v_end[-1] == '\t')
+      )
+        v_end--;
+      return strndup(v, v_end-v);
+    }
+    if (line_end + 2 > end) break;
+    p = line_end + 2;
+  }
+  return "";
+}
+
+bool http_is_connection_close(buffer_t *buf, size_t req_len) {
+  printf("http_is_connection_close buf = %p, req_len = %ld\n", buf, req_len);
+  char *val = http_get_connection_value(buf, req_len);
+  bool is_close = strncmp(val, "close", 5) == 0;
+  free(val);
+  return is_close;
 }
 

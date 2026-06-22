@@ -37,4 +37,6 @@ void http_build_out_resp(client_t *client, size_t hdr_end);
 
 bool http_is_resp_complete(buffer_t *buf);
 
+bool http_is_connection_close(buffer_t *buf, size_t req_len);
+
 #endif
