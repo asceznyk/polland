@@ -15,7 +15,7 @@
 #define DEFAULT_EXPECTED_RESPONSES 3
 #define DEFAULT_URL "http://127.0.0.1:6969/"
 #define BUFFER_BYTES_PER_RESPONSE 8192
-#define DEFAULT_RECV_TIMEOUT_SEC 5
+#define DEFAULT_RECV_TIMEOUT_SEC 30
 #define MAX_URLS 64
 
 enum client_mode {
@@ -214,12 +214,42 @@ static void parse_args(int argc, char **argv, struct config *config) {
     validate_same_origin(&config->urls[0], &config->urls[i]);
 }
 
+static const char *find_content_length(const char *headers, const char *headers_end) {
+  const char *p = headers;
+  while (p < headers_end) {
+    const char *line_end = strstr(p, "\r\n");
+    if (line_end == NULL || line_end > headers_end)
+      break;
+    if (strncasecmp(p, "Content-Length:", 15) == 0)
+      return p;
+    p = line_end + 2;
+  }
+  return NULL;
+}
+
 static int count_http_responses(const char *buf) {
   int count = 0;
   const char *p = buf;
-  while ((p = strstr(p, "HTTP/1.1")) != NULL) {
+  while (1) {
+    const char *headers_end = strstr(p, "\r\n\r\n");
+    if (headers_end == NULL)
+      break;
+    const char *cl = find_content_length(p, headers_end);
+    if (cl == NULL) {
+      if (strncmp(p, "HTTP/1.1", 8) != 0)
+        break;
+      break;
+    }
+    cl += strlen("Content-Length:");
+    while (*cl == ' ')
+      cl++;
+    long content_length = strtol(cl, NULL, 10);
+    if (content_length < 0)
+      break;
+    if ((headers_end + 4 + content_length) > (buf + strlen(buf)))
+      break;
     count++;
-    p += 8;
+    p = headers_end + 4 + content_length;
   }
   return count;
 }

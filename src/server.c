@@ -5,6 +5,7 @@
 #include <sys/epoll.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <string.h>
 #include <stdatomic.h>
 
 #include "config.h"
@@ -22,7 +23,12 @@ void handle_interrupt(int sig) {
 backend_t *backend_pool = NULL;
 int client_req_count = 0;
 
-int main() {
+int main(int argc, char *argv[]) {
+  int debug = 0;
+  for (int i = 0; i < argc; i++) {
+    if (strcmp(argv[i], "--DEBUG") == 0) debug = 1;
+  }
+  int timeout = debug ? 1000 : -1;
   signal(SIGPIPE, SIG_IGN);
   server_cfg = config_parse_file("config/rgnx.json");
   signal(SIGINT, handle_interrupt);
@@ -72,8 +78,17 @@ int main() {
   backend_t *free_backend_head = NULL;
   backend_pool = backend_build_pool(epfd, MIN_UPSTREAM_CONNECTIONS);
   while (running) {
-    printf("main: epoll_wait?!\n");
-    int n = epoll_wait(epfd, sevents, MAX_EVENTS, -1);
+    int n = epoll_wait(epfd, sevents, MAX_EVENTS, timeout);
+    if (n < 0) {
+      if (errno == EINTR)
+        continue;
+      perror("main: epoll_wait");
+      break;
+    }
+    if (n == 0) {
+      printf("main: epoll_wait, tick tick one!\n");
+      continue;
+    }
     printf("main: backend_entry_count = %d ", backend_entry_count);
     backend_show_registry();
     free_client_head = NULL;
@@ -98,24 +113,24 @@ int main() {
         if (events & (EPOLLIN | EPOLLHUP | EPOLLRDHUP)) {
           if (client_handle_read(epfd, client) < 0) dead_client = 1;
         }
-        if (events & EPOLLOUT) {
-          if (client_handle_write(epfd, client) < 0) dead_client = 1;
-        }
         if (events & EPOLLERR) {
           client_mark_closing(client);
           dead_client = 1;
+        }
+        if (events & EPOLLOUT) {
+          if (client_handle_write(epfd, client) < 0) dead_client = 1;
         }
       } else if (ctx->kind == FD_BACKEND) {
         backend_t *backend = (backend_t *)ctx->peer;
         if (events & (EPOLLIN | EPOLLHUP | EPOLLRDHUP)) {
           if (backend_handle_read(epfd, backend) < 0) dead_backend = 1;
         }
-        if (events & EPOLLOUT) {
-          if(backend_handle_write(epfd, backend) < 0) dead_backend = 1;
-        }
         if (events & EPOLLERR) {
           backend_handle_err(epfd, backend);
           dead_backend = 1;
+        }
+        if (events & EPOLLOUT) {
+          if(backend_handle_write(epfd, backend) < 0) dead_backend = 1;
         }
       }
       if (dead_client) {
@@ -130,7 +145,7 @@ int main() {
       }
     }
     while (free_client_head) {
-      printf("main: freeing client fd = %d!\n", free_client_head->fd);
+      printf("main: freeing client %p!\n", free_client_head);
       client_t *next = free_client_head->free_head;
       client_destroy(epfd, free_client_head);
       free_client_head = next;

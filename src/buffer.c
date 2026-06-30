@@ -44,7 +44,6 @@ int buffer_append(buffer_t *buf, const void *src, size_t n) {
 int buffer_send_flat(
   int fd, buffer_t *buf, size_t len, size_t *sent
 ) {
-  printf("buffer_send_flat: %p\n", buf);
   assert(len <= buf->len);
   while (*sent < len) {
     size_t remaining = len - *sent;
@@ -56,7 +55,6 @@ int buffer_send_flat(
     }
     if (n == 0) return -1;
     if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
-    printf("buffer_send_flat: failed?\n");
     return -1;
   }
   return 1;

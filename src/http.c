@@ -138,13 +138,13 @@ int http_open_static_path(char *url) {
   return fd;
 }
 
-void http_build_static_response(
+void http_fill_static_file_content(
   client_t *client, char *url, int file_fd, bool is_head
 ) {
   const char *mime_type = NULL;
-  printf("http_build_static_response: url = %s\n", url);
+  printf("http_fill_static_file_content: url = %s\n", url);
   size_t len = strlen(server_cfg.static_prefix);
-  printf("http_build_static_response: server_cfg.static_prefix = %s\n", server_cfg.static_prefix);
+  printf("http_fill_static_file_content: server_cfg.static_prefix = %s\n", server_cfg.static_prefix);
   if (
     strcmp(url, server_cfg.static_prefix) == 0 ||
     (strncmp(url, server_cfg.static_prefix, len) == 0 && url[len] == '/' && url[len+1] == '\0')
@@ -208,13 +208,15 @@ void http_fill_static_resp_get(
     return;
   }
   printf("http_fill_static_resp_get: file_fd = %d\n", file_fd);
-  http_build_static_response(client, url, file_fd, is_head);
+  http_fill_static_file_content(client, url, file_fd, is_head);
 }
 
-void http_build_static_out(
-  client_t *client, size_t hdr_end, char *url
-) {
+void http_build_static_resp(client_t *client, size_t hdr_end) {
   buffer_t *in_stream = &client->in_stream;
+  char tmp[BUFFER_SIZE];
+  memcpy(tmp, in_stream->data, hdr_end);
+  tmp[hdr_end] = '\0';
+  char *url = http_parse_url(tmp);
   enum http_method method = http_parse_method(in_stream->data, hdr_end);
   if (method == M_HEAD || method == M_GET) {
     http_fill_static_resp_get(client, url, (method == M_HEAD));
@@ -225,23 +227,22 @@ void http_build_static_out(
   );
 }
 
-void http_build_out_resp(client_t *client, size_t hdr_end) {
+bool http_is_static_url(client_t *client, size_t hdr_end) {
   buffer_t *in_stream = &client->in_stream;
   char tmp[BUFFER_SIZE];
   memcpy(tmp, in_stream->data, hdr_end);
   tmp[hdr_end] = '\0';
   char *url = http_parse_url(tmp);
-  if (strncmp(url, server_cfg.static_prefix, strlen(server_cfg.static_prefix)) == 0) {
-    client->in_url_is_static = true;
-    http_build_static_out(client, hdr_end, url);
-    return;
-  } else if (strcmp(server_cfg.upstream.host, "") != 0) {
-    client->in_url_is_static = false;
-    return;
+  if (
+    strncmp(
+      url,
+      server_cfg.static_prefix,
+      strlen(server_cfg.static_prefix)
+    ) == 0
+  ) {
+    return true;
   }
-  http_build_err_resp(
-    client, NOT_IMPLEMENTED_HEADER, NOT_IMPLEMENTED_BODY, false
-  );
+  return false;
 }
 
 ssize_t http_get_content_length(buffer_t *buf) {
@@ -277,7 +278,16 @@ ssize_t http_get_content_length(buffer_t *buf) {
   return -1;
 }
 
-bool http_is_resp_complete(buffer_t *buf) {
+bool http_req_is_body_complete(buffer_t *buf) {
+  char *data = buf->data;
+  size_t len = buf->len;
+  enum http_method method = http_parse_method(data, len);
+  if (method == M_GET || method == M_HEAD)
+    return (find_double_crlf(data, len, 0) >= 0);
+  return false; //FOR NOW!
+}
+
+bool http_resp_is_body_complete(buffer_t *buf) {
   char *hdr = memmem(buf->data, buf->len, "\r\n\r\n", 4);
   if (!hdr)
     return false;
@@ -302,21 +312,24 @@ char *http_get_connection_value(buffer_t *buf, size_t req_len) {
       while (
         v_end > v &&
         (v_end[-1] == '\r' || v_end[-1] == '\n' || v_end[-1] == ' ' || v_end[-1] == '\t')
-      )
-        v_end--;
+      ) v_end--;
       return strndup(v, v_end-v);
     }
     if (line_end + 2 > end) break;
     p = line_end + 2;
   }
-  return "";
+  return NULL;
 }
 
 bool http_is_connection_close(buffer_t *buf, size_t req_len) {
-  printf("http_is_connection_close buf = %p, req_len = %ld\n", buf, req_len);
+  printf("http_is_connection_close: buf = %p, req_len = %ld\n", buf, req_len);
   char *val = http_get_connection_value(buf, req_len);
-  bool is_close = strncmp(val, "close", 5) == 0;
+  printf("http_is_connection_close: val = %s\n", val);
+  if (!val) return false;
+  bool is_close = (strncmp(val, "close", 5) == 0);
   free(val);
   return is_close;
 }
+
+
 

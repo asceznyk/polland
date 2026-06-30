@@ -21,14 +21,14 @@ extern int backend_entry_count;
 
 struct backend_t {
   int fd;
+  int ridx;
   bool closing;
   bool in_has_body;
   client_t *client;
   struct fd_ctx ctx;
   enum {
     BE_CONNECTING,
-    BE_WRITING_HEADERS,
-    BE_WRITING_BODY,
+    BE_WRITING_REQ,
     BE_REQ_COMPLETE
   } in_state;
   enum {
@@ -37,7 +37,6 @@ struct backend_t {
     BE_RESP_COMPLETE
   } out_state;
   size_t in_sent;
-  int ridx;
   backend_t *next;
   backend_t *prev;
   backend_t *free_head;
@@ -78,6 +77,8 @@ void backend_detach_client(
   client_t *client,
   backend_t *backend
 );
+
+void backend_return_client(backend_t *backend);
 
 int backend_handle_err(int epfd, backend_t *backend);
 

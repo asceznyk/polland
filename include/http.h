@@ -33,10 +33,17 @@ void http_build_err_resp(
   bool is_head
 );
 
-void http_build_out_resp(client_t *client, size_t hdr_end);
+bool http_is_static_url(client_t *client, size_t hdr_end);
 
-bool http_is_resp_complete(buffer_t *buf);
+void http_build_static_resp(client_t *client, size_t hdr_end);
+
+ssize_t http_get_content_length(buffer_t *buf);
+
+bool http_req_is_body_complete(buffer_t *buf);
+
+bool http_resp_is_body_complete(buffer_t *buf);
 
 bool http_is_connection_close(buffer_t *buf, size_t req_len);
 
 #endif
+

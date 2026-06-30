@@ -15,6 +15,7 @@
 
 #include "defs.h"
 #include "buffer.h"
+#include "transaction.h"
 #include "fd_ctx.h"
 
 enum body_kind {
@@ -30,14 +31,9 @@ extern int client_req_count;
 
 struct client_t {
   int fd;
-  int req_id;
+  transaction_t transaction;
   bool closing;
-  bool is_connection_close;
-  bool is_http_one_point_o;
-  bool in_has_body;
-  bool in_url_is_static;
-  size_t req_len;
-  size_t in_header_end;
+  //bool will_close;
   buffer_t in_stream;
   buffer_t out_stream;
   size_t out_sent;
@@ -53,8 +49,7 @@ struct client_t {
     CLIENT_REQ_COMPLETE
   } in_state;
   enum  {
-    CLIENT_WRITING_HEADERS,
-    CLIENT_WRITING_BODY,
+    CLIENT_WRITING_RESP,
     CLIENT_RESP_COMPLETE
   } out_state;
   client_t *free_head;

@@ -43,7 +43,7 @@ void backend_init(backend_t *backend, int fd) {
 
 void backend_reset_states(backend_t *backend) {
   backend->in_sent = 0;
-  backend->in_state = BE_WRITING_HEADERS;
+  backend->in_state = BE_WRITING_REQ;
   backend->out_state = BE_READING_HEADERS;
 }
 
@@ -234,37 +234,38 @@ void backend_prepare_closing(backend_t *backend) {
   backend_mark_closing(backend);
 }
 
+void backend_err_fill_client(client_t *client, backend_t *backend) {
+  printf("backend_err_fill_client client = %p, backend = %p\n", client, backend);
+  assert(client != NULL);
+  http_build_err_resp(
+    client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
+  );
+  if (backend->in_state != BE_REQ_COMPLETE)
+    buffer_consume(&client->in_stream, client->transaction.req_len);
+  client->out_state = CLIENT_WRITING_RESP;
+}
+
 int backend_handle_err(int epfd, backend_t *backend) {
   printf("backend_handle_err: %p\n", backend);
   client_t *client = backend->client;
-  if (!client || backend->closing) return -1;
-  backend_prepare_closing(backend);
+  if (!client) return -1;
+  if (!backend->closing)
+    backend_prepare_closing(backend);
+  else {
+    backend_detach_client(client, backend);
+    backend_remove_from_pool(backend);
+  }
   int err = 0;
   socklen_t len = sizeof(err);
   getsockopt(backend->fd, SOL_SOCKET, SO_ERROR, &err, &len);
   printf("backend_handle_err: backend error upstream: %s\n", strerror(err));
   if (backend->out_state == BE_RESP_COMPLETE) return -1;
-  http_build_err_resp(
-    client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
-  );
-  if (backend->in_state != BE_REQ_COMPLETE)
-    buffer_consume(&client->in_stream, client->req_len);
-  client->out_state = CLIENT_WRITING_HEADERS;
+  backend_err_fill_client(client, backend);
   client_epoll_toggle_write(epfd, client, 1);
   return -1;
 }
 
-void backend_adv_out_state(backend_t *backend) {
-  if (backend->out_state == BE_READING_HEADERS) {
-    backend->out_state = BE_READING_BODY;
-  } else if (backend->out_state == BE_READING_BODY) {
-    backend->out_state = BE_RESP_COMPLETE;
-  } else if (backend->out_state == BE_RESP_COMPLETE) {
-    backend->out_state = BE_READING_HEADERS;
-  }
-}
-
-static int backend_handle_idle(int epfd, backend_t *backend) {
+static int backend_handle_idle(backend_t *backend) {
   printf("backend_handle_idle: %p\n", backend);
   char buf[1024];
   for (;;) {
@@ -297,51 +298,68 @@ void backend_return_client(backend_t *backend) {
 
 int backend_handle_read(int epfd, backend_t *backend) {
   printf("backend_handle_read: %p\n", backend);
-  printf(
-    "backend_handle_read: fd = %d client = %p req = %d out_state = %d\n",
-    backend->fd,
-    backend->client,
-    backend->client ? backend->client->req_id : -1,
-    backend->out_state
-  );
-  if (backend->closing) return -1;
+  printf("backend_handle_read: client = %p\n", backend->client);
+  if (backend->closing) {
+    if (backend->client) backend_detach_client(backend->client, backend);
+    return -1;
+  };
   client_t *client = backend->client;
-  if (!client) return backend_handle_idle(epfd, backend);
-  printf("backend_handle_read: "); print_client_in_stream(client);
+  if (!client) return backend_handle_idle(backend);
   if (client->closing) {
     printf("backend_handle_read: closing client %p\n", client);
     return 0;
   }
   int fd = backend->fd;
-  buffer_t *dst = &client->out_stream;
+  buffer_t *buf = &client->out_stream;
+  transaction_t *transaction = &client->transaction;
   for (;;) {
     ssize_t n = recv(
       fd,
-      dst->data + dst->len,
-      dst->cap - dst->len,
+      buf->data + buf->len,
+      buf->cap - buf->len,
       0
     );
     if (n > 0) {
-      dst->len += n;
-      if (
-        (backend->out_state == BE_READING_HEADERS &&
-        find_double_crlf(dst->data, dst->len, 0) != -1) ||
-        backend->out_state == BE_READING_BODY
-      ) backend_adv_out_state(backend);
-      if (http_is_resp_complete(&client->out_stream))
-        backend->out_state = BE_RESP_COMPLETE;
+      buf->len += n;
+      transaction->resp_len += n;
+      size_t header_len = buf->len;
+      if (backend->out_state == BE_READING_HEADERS) {
+        header_len = (size_t)find_double_crlf(buf->data, buf->len, 0);
+        bool is_hdr_end = (header_len > 0);
+        transaction->resp_header_content_len = is_hdr_end
+          ? http_get_content_length(buf)
+          : 0;
+        transaction->resp_header_complete = is_hdr_end;
+        backend->out_state = is_hdr_end ? BE_READING_BODY : BE_READING_HEADERS;
+      }
+      if (backend->out_state == BE_READING_BODY) {
+        size_t body_len = transaction->resp_len - header_len;
+        backend->out_state = (body_len >= transaction->resp_header_content_len)
+          ? BE_RESP_COMPLETE
+          : BE_READING_BODY;
+      }
       continue;
     }
     if (n == 0) {
       printf("backend_handle_read: n == 0! backend closed connection!\n");
-      backend_prepare_closing(backend);
+      if (backend->out_state == BE_RESP_COMPLETE)
+        backend_prepare_closing(backend);
+      else {
+        backend_detach_client(client, backend);
+        backend_mark_closing(backend);
+        backend_err_fill_client(client, backend);
+        client_epoll_toggle_write(epfd, client, 1);
+        return -1;
+      }
       break;
     }
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       printf("backend_handle_read: EAGAIN | EWOULDBLOCK\n");
+      printf("backend_handle_read: "); print_client_out_stream(client);
       printf("backend_handle_read: backend->out_state = %d\n", backend->out_state);
       break;
     };
+    backend_mark_closing(backend);
     return -1;
   }
   if (backend->out_state == BE_RESP_COMPLETE) backend_return_client(backend);
@@ -349,27 +367,15 @@ int backend_handle_read(int epfd, backend_t *backend) {
   return 0;
 }
 
-void backend_adv_in_state(backend_t *backend) {
-  if (backend->in_state == BE_CONNECTING) {
-    backend->in_state = BE_WRITING_HEADERS;
-  } else if (backend->in_state == BE_WRITING_HEADERS) {
-    backend->in_state = backend->in_has_body ?
-      BE_WRITING_BODY :
-      BE_REQ_COMPLETE;
-  } else if (backend->in_state == BE_WRITING_BODY) {
-    backend->in_state = BE_REQ_COMPLETE;
-  } else if (backend->in_state == BE_REQ_COMPLETE) {
-    backend->in_state = BE_WRITING_HEADERS;
-  }
-}
-
 int backend_handle_write(int epfd, backend_t *backend) {
   printf("backend_handle_write: %p\n", backend);
-  if (backend->closing) return -1;
+  if (backend->closing) {
+    if (backend->client) backend_detach_client(backend->client, backend);
+    return -1;
+  };
   client_t *client = backend->client;
   if (!client) return 0;
-  printf("backend_handle_write: client->req_id = %d\n", client->req_id);
-  printf("backend_handle_write: client->req_len = %ld\n", client->req_len);
+  printf("backend_handle_write: "); print_client_in_stream(client);
   if (client->closing) {
     printf("backend_handle_write: closing client %p\n", client);
     return 0;
@@ -385,24 +391,20 @@ int backend_handle_write(int epfd, backend_t *backend) {
         goto fail;
       }
       if (err != 0) goto fail;
-      backend_adv_in_state(backend);
+      backend->in_state = BE_WRITING_REQ;
       continue;
     }
     if (backend->in_state == BE_REQ_COMPLETE) {
-      //backend_adv_in_state(backend);
       printf("backend_handle_write: BE_REQ_COMPLETE\n");
       backend_epoll_toggle_write(epfd, backend, 0);
       return 0;
     }
-    if (
-      backend->in_state == BE_WRITING_HEADERS ||
-      backend->in_state == BE_WRITING_BODY
-    ) {
-      printf("backend_handle_write: BE_WRITING_HEADERS | BE_WRITING_BODY\n");
+    if (backend->in_state == BE_WRITING_REQ) {
+      printf("backend_handle_write: BE_WRITING_REQ\n");
       rc = buffer_send_flat(
         backend->fd,
         &client->in_stream,
-        client->req_len,
+        client->transaction.req_len,
         &backend->in_sent
       );
       if (rc < 0) {
@@ -413,7 +415,8 @@ int backend_handle_write(int epfd, backend_t *backend) {
         printf("backend_handle_write: rc == 0?\n");
         return 0;
       } // EAGAIN
-      backend_adv_in_state(backend);
+      if (client->in_state == CLIENT_REQ_COMPLETE)
+        backend->in_state = BE_REQ_COMPLETE;
       buffer_consume(&client->in_stream, backend->in_sent);
       backend->in_sent = 0;
       continue;
