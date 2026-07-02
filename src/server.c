@@ -24,6 +24,12 @@ backend_t *backend_pool = NULL;
 int client_req_count = 0;
 
 int main(int argc, char *argv[]) {
+  printf("main: sizeof(client_t) = %zu\n", sizeof(client_t));
+  printf("main: sizeof(buffer_t) = %zu\n", sizeof(buffer_t));
+  printf("main: sizeof(transaction_t) = %zu\n", sizeof(transaction_t));
+  printf("main: sizeof(backend_t) = %zu\n", sizeof(backend_t));
+  printf("main: sizeof(fd_ctx_t) = %zu\n", sizeof(fd_ctx_t));
+  printf("main: sizeof(config_t) = %zu\n", sizeof(config_t));
   int debug = 0;
   for (int i = 0; i < argc; i++) {
     if (strcmp(argv[i], "--DEBUG") == 0) debug = 1;
@@ -90,7 +96,6 @@ int main(int argc, char *argv[]) {
       continue;
     }
     printf("main: backend_entry_count = %d ", backend_entry_count);
-    backend_show_registry();
     free_client_head = NULL;
     printf("main: n = %d\n", n);
     for (int i = 0; i < n; i++) {
@@ -99,7 +104,7 @@ int main(int argc, char *argv[]) {
         client_accept_conn(epfd, server_fd);
         continue;
       }
-      struct fd_ctx *ctx = sevents[i].data.ptr;
+      fd_ctx_t *ctx = sevents[i].data.ptr;
       printf("main: ctx->kind = %d, ctx->fd = %d\n", ctx->kind, ctx->fd);
       printf("main: ctx->peer %p\n", ctx->peer);
       if (ctx->closing) {

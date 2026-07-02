@@ -234,15 +234,17 @@ void backend_prepare_closing(backend_t *backend) {
   backend_mark_closing(backend);
 }
 
-void backend_err_fill_client(client_t *client, backend_t *backend) {
-  printf("backend_err_fill_client client = %p, backend = %p\n", client, backend);
+void backend_err_update_client(client_t *client, backend_t *backend) {
+  printf("backend_err_update_client: client = %p, backend = %p\n", client, backend);
   assert(client != NULL);
+  transaction_t *transaction = &client->transaction;
   http_build_err_resp(
     client, BAD_GATEWAY_HEADER, BAD_GATEWAY_BODY, false
   );
   if (backend->in_state != BE_REQ_COMPLETE)
     buffer_consume(&client->in_stream, client->transaction.req_len);
   client->out_state = CLIENT_WRITING_RESP;
+  transaction->resp_header_complete = true;
 }
 
 int backend_handle_err(int epfd, backend_t *backend) {
@@ -258,9 +260,9 @@ int backend_handle_err(int epfd, backend_t *backend) {
   int err = 0;
   socklen_t len = sizeof(err);
   getsockopt(backend->fd, SOL_SOCKET, SO_ERROR, &err, &len);
-  printf("backend_handle_err: backend error upstream: %s\n", strerror(err));
+  printf("backend_handle_err: backend error upstream: (%s)\n", strerror(err));
   if (backend->out_state == BE_RESP_COMPLETE) return -1;
-  backend_err_fill_client(client, backend);
+  backend_err_update_client(client, backend);
   client_epoll_toggle_write(epfd, client, 1);
   return -1;
 }
@@ -322,19 +324,21 @@ int backend_handle_read(int epfd, backend_t *backend) {
     if (n > 0) {
       buf->len += n;
       transaction->resp_len += n;
-      size_t header_len = buf->len;
       if (backend->out_state == BE_READING_HEADERS) {
-        header_len = (size_t)find_double_crlf(buf->data, buf->len, 0);
-        bool is_hdr_end = (header_len > 0);
+        printf("backend_handle_read: BE_READING_HEADERS\n");
+        transaction->resp_header_len = find_double_crlf(buf->data, buf->len, 0);
+        bool is_hdr_end = (transaction->resp_header_len > 0);
+        transaction->resp_header_complete = is_hdr_end;
         transaction->resp_header_content_len = is_hdr_end
           ? http_get_content_length(buf)
           : 0;
-        transaction->resp_header_complete = is_hdr_end;
         backend->out_state = is_hdr_end ? BE_READING_BODY : BE_READING_HEADERS;
       }
       if (backend->out_state == BE_READING_BODY) {
-        size_t body_len = transaction->resp_len - header_len;
-        backend->out_state = (body_len >= transaction->resp_header_content_len)
+        printf("backend_handle_read: BE_READING_BODY\n");
+        assert(transaction->resp_header_len > -1);
+        transaction->resp_body_len = transaction->resp_len - transaction->resp_header_len;
+        backend->out_state = (transaction->resp_body_len >= transaction->resp_header_content_len)
           ? BE_RESP_COMPLETE
           : BE_READING_BODY;
       }
@@ -347,7 +351,7 @@ int backend_handle_read(int epfd, backend_t *backend) {
       else {
         backend_detach_client(client, backend);
         backend_mark_closing(backend);
-        backend_err_fill_client(client, backend);
+        backend_err_update_client(client, backend);
         client_epoll_toggle_write(epfd, client, 1);
         return -1;
       }
@@ -359,6 +363,7 @@ int backend_handle_read(int epfd, backend_t *backend) {
       printf("backend_handle_read: backend->out_state = %d\n", backend->out_state);
       break;
     };
+    printf("backend_handle_read: errno = %d (%s)\n", errno, strerror(errno));
     backend_mark_closing(backend);
     return -1;
   }

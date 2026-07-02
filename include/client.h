@@ -30,29 +30,28 @@ typedef struct client_t client_t;
 extern int client_req_count;
 
 struct client_t {
-  int fd;
   transaction_t transaction;
-  bool closing;
-  //bool will_close;
   buffer_t in_stream;
   buffer_t out_stream;
+  backend_t *backend;
+  client_t *free_head;
   size_t out_sent;
-  enum body_kind out_body_kind;
-  int out_file_fd;
   size_t out_file_size;
   off_t out_file_offset;
-  backend_t *backend;
-  struct fd_ctx ctx;
+  int fd;
+  int out_file_fd;
+  fd_ctx_t ctx;
+  enum body_kind out_body_kind;
   enum {
     CLIENT_READING_HEADERS,
     CLIENT_READING_BODY,
     CLIENT_REQ_COMPLETE
   } in_state;
-  enum  {
+  enum {
     CLIENT_WRITING_RESP,
     CLIENT_RESP_COMPLETE
   } out_state;
-  client_t *free_head;
+  bool closing;
 };
 
 void client_accept_conn(int epfd, int server_fd);

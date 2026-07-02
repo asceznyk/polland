@@ -319,6 +319,7 @@ int client_handle_write(int epfd, client_t *client) {
       }
       if (rc < 0) goto fail;
       if (rc == 0) return 0;
+      printf("client_handle_write: transaction->resp_header_complete = %d\n", transaction->resp_header_complete);
       if (transaction->req_is_static || transaction->resp_header_complete)
         client_reset_out_streams(client);
       if (

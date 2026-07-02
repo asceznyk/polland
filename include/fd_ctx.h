@@ -1,14 +1,14 @@
 #ifndef FD_CTX_H
 #define FD_CTX_H
 
-struct fd_ctx {
-  bool closing;
+typedef struct {
+  void *peer;
   enum {
     FD_CLIENT,
     FD_BACKEND
   } kind;
-  void *peer;
   int fd;
-};
+  bool closing;
+} fd_ctx_t;
 
 #endif

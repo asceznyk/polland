@@ -20,12 +20,14 @@ typedef struct backend_t backend_t;
 extern int backend_entry_count;
 
 struct backend_t {
+  fd_ctx_t ctx;
+  client_t *client;
+  backend_t *next;
+  backend_t *prev;
+  backend_t *free_head;
+  size_t in_sent;
   int fd;
   int ridx;
-  bool closing;
-  bool in_has_body;
-  client_t *client;
-  struct fd_ctx ctx;
   enum {
     BE_CONNECTING,
     BE_WRITING_REQ,
@@ -36,10 +38,8 @@ struct backend_t {
     BE_READING_BODY,
     BE_RESP_COMPLETE
   } out_state;
-  size_t in_sent;
-  backend_t *next;
-  backend_t *prev;
-  backend_t *free_head;
+  bool closing;
+  bool in_has_body;
 };
 
 extern backend_t *backend_pool;

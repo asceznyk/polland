@@ -9,13 +9,13 @@
 #include <yyjson.h>
 
 typedef struct {
-  uint16_t port;
-  const char *static_root;
-  const char *static_prefix;
   struct {
     const char *host;
     uint16_t port;
   } upstream;
+  const char *static_root;
+  const char *static_prefix;
+  uint16_t port;
 } config_t;
 
 extern config_t server_cfg;
