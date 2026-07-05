@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdatomic.h>
 
+#include "log.h"
 #include "config.h"
 #include "client.h"
 #include "backend.h"
@@ -15,8 +16,8 @@
 static atomic_bool running = 1;
 
 void handle_interrupt(int sig) {
-  printf("handle_interrupt: signal recieved %d\n", sig);
-  printf("handle_interrupt: SIGINT/SIGTERM recieved, stopping the server..\n");
+  LOG_INFO("handle_interrupt: signal recieved %d", sig);
+  LOG_INFO("handle_interrupt: SIGINT/SIGTERM recieved, stopping the server..");
   running = 0;
 }
 
@@ -24,17 +25,13 @@ backend_t *backend_pool = NULL;
 int client_req_count = 0;
 
 int main(int argc, char *argv[]) {
-  printf("main: sizeof(client_t) = %zu\n", sizeof(client_t));
-  printf("main: sizeof(buffer_t) = %zu\n", sizeof(buffer_t));
-  printf("main: sizeof(transaction_t) = %zu\n", sizeof(transaction_t));
-  printf("main: sizeof(backend_t) = %zu\n", sizeof(backend_t));
-  printf("main: sizeof(fd_ctx_t) = %zu\n", sizeof(fd_ctx_t));
-  printf("main: sizeof(config_t) = %zu\n", sizeof(config_t));
+  LOG_INFO("main: starting server...");
   int debug = 0;
   for (int i = 0; i < argc; i++) {
     if (strcmp(argv[i], "--DEBUG") == 0) debug = 1;
   }
   int timeout = debug ? 1000 : -1;
+  g_log_level = debug ? LOG_DEBUG : LOG_INFO;
   signal(SIGPIPE, SIG_IGN);
   server_cfg = config_parse_file("config/rgnx.json");
   signal(SIGINT, handle_interrupt);
@@ -42,7 +39,7 @@ int main(int argc, char *argv[]) {
   int server_fd;
   int opt = 1;
   if((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-    perror("failed to create socket!\n");
+    perror("failed to create socket!");
     exit(EXIT_FAILURE);
   }
   setsockopt(
@@ -63,14 +60,14 @@ int main(int argc, char *argv[]) {
       sizeof(server_addr)
     ) < 0
   ) {
-    perror("failed bind to socket address\n");
+    perror("failed bind to socket address");
     exit(EXIT_FAILURE);
   }
   if(listen(server_fd, MAX_BACKLOG) < 0) {
-    perror("failed to listen!\n");
+    perror("failed to listen!");
     exit(EXIT_FAILURE);
   }
-  printf("main: server is listening on port %d\n", server_cfg.port);
+  LOG_INFO("main: server is listening on port %d", server_cfg.port);
   int epfd = epoll_create1(0);
   struct epoll_event evt = {
     .events = EPOLLIN,
@@ -92,12 +89,12 @@ int main(int argc, char *argv[]) {
       break;
     }
     if (n == 0) {
-      printf("main: epoll_wait, tick tick one!\n");
+      LOG_DEBUG("main: epoll_wait, tick tick one!");
       continue;
     }
-    printf("main: backend_entry_count = %d ", backend_entry_count);
+    LOG_DEBUG("main: backend_entry_count = %d ", backend_entry_count);
     free_client_head = NULL;
-    printf("main: n = %d\n", n);
+    LOG_DEBUG("main: n = %d", n);
     for (int i = 0; i < n; i++) {
       uint32_t events = sevents[i].events;
       if (sevents[i].data.fd == server_fd) {
@@ -105,14 +102,13 @@ int main(int argc, char *argv[]) {
         continue;
       }
       fd_ctx_t *ctx = sevents[i].data.ptr;
-      printf("main: ctx->kind = %d, ctx->fd = %d\n", ctx->kind, ctx->fd);
-      printf("main: ctx->peer %p\n", ctx->peer);
-      if (ctx->closing) {
-        printf("main: ctx marked as closing!\n");
-        continue;
-      }
+      LOG_DEBUG(
+        "main: ctx->peer = %d, ctx->kind = %d, ctx->fd = %d, ctx->closing = %d",
+        ctx->peer, ctx->kind, ctx->fd, ctx->closing
+      );
+      if (ctx->closing) continue;
       int dead_client = 0, dead_backend = 0;
-      printf("main: events = 0x%x\n", events);
+      LOG_DEBUG("main: events = 0x%x", events);
       if (ctx->kind == FD_CLIENT) {
         client_t *client = (client_t *)ctx->peer;
         if (events & (EPOLLIN | EPOLLHUP | EPOLLRDHUP)) {
@@ -150,21 +146,19 @@ int main(int argc, char *argv[]) {
       }
     }
     while (free_client_head) {
-      printf("main: freeing client %p!\n", free_client_head);
       client_t *next = free_client_head->free_head;
       client_destroy(epfd, free_client_head);
       free_client_head = next;
     }
     while (free_backend_head) {
-      printf("main: freeing backend fd = %d!\n", free_backend_head->fd);
       backend_t *next = free_backend_head->free_head;
       backend_destroy(epfd, free_backend_head);
       free_backend_head = next;
     }
     if (!backend_entry_count) backend_pool = NULL;
-    printf("main: end of iteration!\n");
+    LOG_DEBUG("main: end of iteration!");
   }
-  printf("main: closing all clients and main server thread...\n");
+  LOG_INFO("main: closing all clients and main server thread...");
   epoll_ctl(epfd, EPOLL_CTL_DEL, server_fd, NULL);
   close(server_fd);
   close(epfd);

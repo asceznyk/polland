@@ -46,8 +46,6 @@ extern backend_t *backend_pool;
 
 extern backend_t *backend_registry[MAX_UPSTREAM_CONNECTIONS];
 
-void backend_show_registry();
-
 backend_t *backend_create(int fd);
 
 backend_t *backend_build_pool(int epfd, int k);

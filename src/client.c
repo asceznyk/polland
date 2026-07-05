@@ -1,3 +1,4 @@
+#include "log.h"
 #include "config.h"
 #include "utils.h"
 #include "backend.h"
@@ -5,7 +6,7 @@
 #include "http.h"
 
 void client_io_buffers_free(client_t *client) {
-  printf("client_io_buffers_free: reached\n");
+  LOG_DEBUG("client_io_buffers_free: reached");
   buffer_free(&client->in_stream);
   buffer_free(&client->out_stream);
 }
@@ -24,7 +25,7 @@ bool client_init(client_t *client, int fd) {
   if (!transaction_init(&client->transaction)) goto fail;
   if (!buffer_init(&client->in_stream, BUFFER_SIZE)) goto fail;
   if (!buffer_init(&client->out_stream, BUFFER_SIZE)) goto fail;
-  printf("client_init: inited buffers!\n");
+  LOG_DEBUG("client_init: inited buffers!");
   client->ctx.closing = false;
   client->ctx.kind = FD_CLIENT;
   client->ctx.peer = client;
@@ -35,28 +36,28 @@ bool client_init(client_t *client, int fd) {
 }
 
 void client_mark_closing(client_t *client) {
-  printf("client_mark_closing: client->fd = %d\n", client->fd);
+  LOG_DEBUG("client_mark_closing: client->fd = %d", client->fd);
   if (client->ctx.closing || client->closing) return;
   client->ctx.closing = true;
   client->closing = true;
 }
 
 void client_destroy(int epfd, client_t *client) {
-  printf("client_destroy: reached\n");
+  LOG_DEBUG("client_destroy: reached");
   if (client->fd != -1) {
-    printf("client_destroy: closing client->fd = %d!\n", client->fd);
+    LOG_DEBUG("client_destroy: closing client->fd = %d!", client->fd);
     epoll_ctl(epfd, EPOLL_CTL_DEL, client->fd, NULL);
     close(client->fd);
     client->fd = -1;
   }
   if (client->backend && client->backend->fd != -1) {
-    printf("client_destroy: backend present %p\n", client->backend);
+    LOG_DEBUG("client_destroy: backend present %p", client->backend);
     backend_t *backend = client->backend;
     backend_return_client(backend);
   }
   client_io_buffers_free(client);
   client->ctx.peer = NULL;
-  printf("client_destroy: destroying %p!\n", client);
+  LOG_DEBUG("client_destroy: destroying %p!", client);
   free(client);
 }
 
@@ -87,7 +88,7 @@ bool client_epoll_register(int epfd, client_t *client) {
 void client_epoll_toggle_write(
   int epfd, client_t *client, bool add_write
 ) {
-  printf("client_epoll_toggle_write: fd = %d, add_write = %d\n", client->fd, add_write);
+  LOG_DEBUG("client_epoll_toggle_write: fd = %d, add_write = %d", client->fd, add_write);
   struct epoll_event evt = {0};
   uint32_t events = EPOLLET | EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
   if (add_write) events |= EPOLLOUT;
@@ -116,7 +117,7 @@ void client_accept_conn(int epfd, int server_fd) {
 }
 
 bool client_setup_backend(int epfd, backend_t **backend) {
-  printf("client_setup_backend!\n");
+  LOG_DEBUG("client_setup_backend!");
   int fd = backend_connect(
     server_cfg.upstream.host,
     server_cfg.upstream.port
@@ -136,46 +137,46 @@ bool client_setup_backend(int epfd, backend_t **backend) {
 }
 
 bool client_borrow_backend(int epfd, client_t *client) {
-  printf("client_borrow_backend: reached!\n");
+  LOG_DEBUG("client_borrow_backend: reached!");
   if (client->backend) {
-    printf("client_borrow_backend: HAS EXISTTING BACKEND!\n");
+    LOG_DEBUG("client_borrow_backend: HAS EXISTTING BACKEND!");
     backend_epoll_toggle_write(epfd, client->backend, 1);
     return true;
   }
   backend_t *backend = NULL;
-  printf("client_borrow_backend: backend_pool = %p\n", backend_pool);
+  LOG_DEBUG("client_borrow_backend: backend_pool = %p", backend_pool);
   if (!backend_pool) {
     if (!client_setup_backend(epfd, &backend)) return false;
   } else {
     backend = backend_detach_from_pool();
-    printf("client_borrow_backend: backend->fd = %d\n", backend->fd);
+    LOG_DEBUG("client_borrow_backend: backend->fd = %d", backend->fd);
     if (backend->fd == -1) {
       if (!client_setup_backend(epfd, &backend)) return false;
     }
   }
-  printf("client_borrow_backend: backend = %p\n", backend);
+  LOG_DEBUG("client_borrow_backend: backend = %p", backend);
   backend_attach_client(client, backend);
   backend_epoll_toggle_write(epfd, backend, 1);
   return true;
 }
 
 int client_process_in_stream(int epfd, client_t *client) {
-  printf("client_process_in_stream: called!\n");
+  LOG_DEBUG("client_process_in_stream: called!");
   if (client->backend) return 0;
   buffer_t *buf = &client->in_stream;
   transaction_t *transaction = &client->transaction;
   size_t bytes_read = 0;
   size_t len_buf = buf->len;
-  printf("client_process_in_stream: len_buf = %ld\n", len_buf);
+  LOG_DEBUG("client_process_in_stream: len_buf = %ld", len_buf);
   while (bytes_read <= len_buf) {
     if (client->in_state == CLIENT_REQ_COMPLETE) {
-      printf("client_process_in_stream: CLIENT_REQ_COMPLETE!\n");
+      LOG_DEBUG("client_process_in_stream: CLIENT_REQ_COMPLETE!");
       if (transaction->req_is_static)
         client->in_state = CLIENT_READING_HEADERS;
       break;
     }
     if (client->in_state == CLIENT_READING_HEADERS) {
-      printf("client_process_in_stream: CLIENT_READING_HEADERS...\n");
+      LOG_DEBUG("client_process_in_stream: CLIENT_READING_HEADERS...");
       ssize_t hdr_end = find_double_crlf(buf->data, buf->len, 0);
       if (hdr_end == -1) break;
       if (http_req_is_body_complete(&client->in_stream)) {
@@ -209,7 +210,7 @@ int client_process_in_stream(int epfd, client_t *client) {
 }
 
 int client_handle_read(int epfd, client_t *client) {
-  printf("client_handle_read: reached!\n");
+  LOG_DEBUG("client_handle_read: reached!");
   buffer_t *buf = &client->in_stream;
   if (!buf) return 0;
   if (client->closing) return -1;
@@ -222,9 +223,9 @@ int client_handle_read(int epfd, client_t *client) {
       0
     );
     if (buf->len > buf->cap)
-      printf("client_handle_read: error! buf->len = %ld buf->cap = %ld\n", buf->len, buf->cap);
+      LOG_DEBUG("client_handle_read: error! buf->len = %ld buf->cap = %ld", buf->len, buf->cap);
     if (n == 0) {
-      printf("client_handle_read: client connection closed on read! n == 0\n");
+      LOG_DEBUG("client_handle_read: client connection closed on read! n == 0");
       if (!client->backend && client->out_state == CLIENT_RESP_COMPLETE) {
         client_mark_closing(client);
         return -1;
@@ -235,14 +236,14 @@ int client_handle_read(int epfd, client_t *client) {
       if (errno == EINTR)
         continue;
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        printf("client_handle_read: EAGAIN\n");
+        LOG_DEBUG("client_handle_read: EAGAIN");
         return client_process_in_stream(epfd, client);
       }
       client_mark_closing(client);
       return -1;
     }
     buf->len += n;
-    printf("client_handle_read: "); print_client_in_stream(client);
+    LOG_DEBUG("client_handle_read: "); print_client_in_stream(client);
   }
   return 1;
 }
@@ -265,19 +266,19 @@ void client_reset_transaction(client_t *client) {
 }
 
 int client_handle_write(int epfd, client_t *client) {
-  printf("client_handle_write: %p!\n", client);
+  LOG_DEBUG("client_handle_write: %p!", client);
   if (client->closing) return -1;
   transaction_t *transaction = &client->transaction;
   for (;;) {
     int rc;
     if (client->out_state == CLIENT_RESP_COMPLETE) {
-      printf("client_handle_write: client->out_state == CLIENT_RESP_COMPLETE\n");
+      LOG_DEBUG("client_handle_write: client->out_state == CLIENT_RESP_COMPLETE");
       client->out_state = CLIENT_WRITING_RESP;
       client->in_state = CLIENT_READING_HEADERS;
       if (transaction->req_is_connection_close || transaction->req_is_http_one_point_o)
         goto close;
       client_reset_transaction(client);
-      printf("client_handle_write: client->in_stream.len = %ld\n", client->in_stream.len);
+      LOG_DEBUG("client_handle_write: client->in_stream.len = %ld", client->in_stream.len);
       if (!client->backend && client->in_stream.len > 0) {
         assert(client->backend == NULL);
         assert(client->out_stream.len == 0);
@@ -287,13 +288,13 @@ int client_handle_write(int epfd, client_t *client) {
       return 0;
     }
     if (client->out_state == CLIENT_WRITING_RESP) {
-      printf("client_handle_write: client->out_state == CLIENT_WRITING_RESP\n");
-      printf("client_handle_write: client->out_stream.len = %ld\n", client->out_stream.len);
+      LOG_DEBUG("client_handle_write: client->out_state == CLIENT_WRITING_RESP");
+      LOG_DEBUG("client_handle_write: client->out_stream.len = %ld", client->out_stream.len);
       if (client->out_stream.len <= 0)
         return 0;
       rc = 1;
       if (client->out_body_kind == BODY_FILE) {
-        printf("client_handle_write: client->out_file_fd = %d\n", client->out_file_fd);
+        LOG_DEBUG("client_handle_write: client->out_file_fd = %d", client->out_file_fd);
         rc = buffer_send_flat(
           client->fd,
           &client->out_stream,
@@ -309,7 +310,7 @@ int client_handle_write(int epfd, client_t *client) {
           client->out_file_size
         );
       } else {
-        printf("client_handle_write: "); print_client_out_stream(client);
+        LOG_DEBUG("client_handle_write: "); print_client_out_stream(client);
         rc = buffer_send_flat(
           client->fd,
           &client->out_stream,
@@ -319,7 +320,7 @@ int client_handle_write(int epfd, client_t *client) {
       }
       if (rc < 0) goto fail;
       if (rc == 0) return 0;
-      printf("client_handle_write: transaction->resp_header_complete = %d\n", transaction->resp_header_complete);
+      LOG_DEBUG("client_handle_write: transaction->resp_header_complete = %d", transaction->resp_header_complete);
       if (transaction->req_is_static || transaction->resp_header_complete)
         client_reset_out_streams(client);
       if (

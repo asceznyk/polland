@@ -2,7 +2,6 @@
 #include "buffer.h"
 
 bool buffer_init(buffer_t *buf, size_t cap) {
-  printf("buffer_init: reached\n");
   buf->data = cap ? malloc(cap) : NULL;
   if (cap && !buf->data) return false;
   buf->len = 0;

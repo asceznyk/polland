@@ -142,9 +142,7 @@ void http_fill_static_file_content(
   client_t *client, char *url, int file_fd, bool is_head
 ) {
   const char *mime_type = NULL;
-  printf("http_fill_static_file_content: url = %s\n", url);
   size_t len = strlen(server_cfg.static_prefix);
-  printf("http_fill_static_file_content: server_cfg.static_prefix = %s\n", server_cfg.static_prefix);
   if (
     strcmp(url, server_cfg.static_prefix) == 0 ||
     (strncmp(url, server_cfg.static_prefix, len) == 0 && url[len] == '/' && url[len+1] == '\0')
@@ -207,7 +205,6 @@ void http_fill_static_resp_get(
     );
     return;
   }
-  printf("http_fill_static_resp_get: file_fd = %d\n", file_fd);
   http_fill_static_file_content(client, url, file_fd, is_head);
 }
 
