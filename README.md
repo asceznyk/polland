@@ -1,6 +1,6 @@
-# rgnx
+# RGNX
 
-**rgnx** is a minimal, experimental HTTP server inspired by the architecture and philosophy of **NGINX**.
+**RGNX** is a minimal, experimental HTTP server inspired by the architecture and philosophy of **NGINX**.
 The goal of the project is to understand how high-performance web servers work internally by building one from scratch.
 
 This project is currently **a work in progress**. The design, features, and APIs are actively evolving.
@@ -8,7 +8,7 @@ This project is currently **a work in progress**. The design, features, and APIs
 
 ## Overview
 
-rgnx is a small web server that explores core ideas behind modern event-driven servers such as:
+RGNX is a small web server that explores core ideas behind modern event-driven servers such as:
 
 * Non-blocking network I/O
 * Event-driven request handling
@@ -62,7 +62,7 @@ http://localhost:6969
 
 ## Status
 
-rgnx is **early stage** and not intended for any kind of actual use.
+RGNX is **early stage** and not intended for any kind of actual use.
 
 The primary goal is learning how a system like **NGINX** works internally.
 

@@ -332,12 +332,21 @@ int backend_handle_read(int epfd, backend_t *backend) {
         transaction->resp_header_content_len = is_hdr_end
           ? http_get_content_length(buf)
           : 0;
+        printf("backend_handle_read: transaction->resp_len = %zu\n", transaction->resp_len);
+        http_resp_redact_server_name(buf, transaction);
+        printf("backend_handle_read: transaction->resp_len = %zu\n", transaction->resp_len);
         backend->out_state = is_hdr_end ? BE_READING_BODY : BE_READING_HEADERS;
       }
       if (backend->out_state == BE_READING_BODY) {
         printf("backend_handle_read: BE_READING_BODY\n");
         assert(transaction->resp_header_len > -1);
         transaction->resp_body_len = transaction->resp_len - transaction->resp_header_len;
+        printf("backend_handle_read: transaction->resp_header_len = %zu\n", transaction->resp_header_len);
+        printf(
+          "backend_handle_read: transaction->resp_body_len = %zu, transaction->resp_header_content_len = %zu\n",
+          transaction->resp_body_len,
+          transaction->resp_header_content_len
+        );
         backend->out_state = (transaction->resp_body_len >= transaction->resp_header_content_len)
           ? BE_RESP_COMPLETE
           : BE_READING_BODY;

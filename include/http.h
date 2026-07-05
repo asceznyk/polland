@@ -43,7 +43,9 @@ bool http_req_is_body_complete(buffer_t *buf);
 
 bool http_resp_is_body_complete(buffer_t *buf);
 
-bool http_is_connection_close(buffer_t *buf, size_t req_len);
+bool http_req_is_connection_close(buffer_t *buf, size_t req_len);
+
+void http_resp_redact_server_name(buffer_t *buf, transaction_t *transaction);
 
 #endif
 

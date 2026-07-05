@@ -7,6 +7,7 @@
 #define MAX_EVENTS 64
 #define MIN_UPSTREAM_CONNECTIONS 16
 #define MAX_UPSTREAM_CONNECTIONS 1024
+#define SERVER_NAME "rgnx/0.0.1"
 
 #endif
 

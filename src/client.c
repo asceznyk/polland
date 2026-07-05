@@ -182,7 +182,7 @@ int client_process_in_stream(int epfd, client_t *client) {
         client->in_state = CLIENT_REQ_COMPLETE;
         transaction->req_len = (size_t)hdr_end;
       }
-      if (http_is_connection_close(&client->in_stream, transaction->req_len))
+      if (http_req_is_connection_close(&client->in_stream, transaction->req_len))
         transaction->req_is_connection_close = true;
       bytes_read += transaction->req_len;
       if (client->in_state != CLIENT_REQ_COMPLETE) continue;

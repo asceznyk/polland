@@ -246,24 +246,21 @@ bool http_is_static_url(client_t *client, size_t hdr_end) {
 }
 
 ssize_t http_get_content_length(buffer_t *buf) {
-  const char *headers_end = buf->data;
+  const char *end = buf->data;
   size_t pos = (size_t)find_double_crlf(buf->data, buf->len, 0);
-  headers_end = headers_end + pos;
+  end = end + pos;
   const char *p = buf->data;
-  while (p < headers_end) {
+  size_t exp_len = sizeof("Content-Length:")-1;
+  while (p < end) {
     const char *line_end = p;
-    while (
-      line_end < headers_end &&
-      !(line_end[0] == '\r' && line_end[1] == '\n')
-    ) {
+    while (line_end < end && !(line_end[0] == '\r' && line_end[1] == '\n'))
       line_end++;
-    }
     size_t line_len = line_end - p;
     if (
-      line_len >= 15 &&
-      strncasecmp(p, "Content-Length:", 15) == 0
+      line_len >= exp_len &&
+      strncasecmp(p, "Content-Length:", exp_len) == 0
     ) {
-      const char *v = p + 15;
+      const char *v = p + exp_len;
       while (v < line_end && (*v == ' ' || *v == '\t'))
         v++;
       ssize_t content_length = 0;
@@ -298,15 +295,19 @@ bool http_resp_is_body_complete(buffer_t *buf) {
   return body_length >= (size_t)content_length;
 }
 
-char *http_get_connection_value(buffer_t *buf, size_t req_len) {
+static char *http_get_connection_value(buffer_t *buf, size_t req_len) {
   char *end = buf->data + req_len;
   char *p = buf->data;
+  size_t exp_len = sizeof("Connection:")-1;
   while (p < end) {
     char *line_end = p;
     while (line_end + 1 < end && !(line_end[0] == '\r' && line_end[1] == '\n'))
       line_end++;
-    if (line_end - p >= 11 && strncasecmp(p, "Connection:", 11) == 0) {
-      char *v = p + 11;
+    if (
+      (size_t)(line_end-p) >= exp_len &&
+      strncasecmp(p, "Connection:", exp_len) == 0
+    ) {
+      char *v = p + exp_len;
       while (v < line_end && (*v == ' ' || *v == '\t')) v++;
       char *v_end = line_end;
       while (
@@ -315,21 +316,52 @@ char *http_get_connection_value(buffer_t *buf, size_t req_len) {
       ) v_end--;
       return strndup(v, v_end-v);
     }
-    if (line_end + 2 > end) break;
-    p = line_end + 2;
+    if (line_end+2 > end) break;
+    p = line_end+2;
   }
   return NULL;
 }
 
-bool http_is_connection_close(buffer_t *buf, size_t req_len) {
-  printf("http_is_connection_close: buf = %p, req_len = %ld\n", buf, req_len);
+bool http_req_is_connection_close(buffer_t *buf, size_t req_len) {
   char *val = http_get_connection_value(buf, req_len);
-  printf("http_is_connection_close: val = %s\n", val);
   if (!val) return false;
   bool is_close = (strncmp(val, "close", 5) == 0);
   free(val);
   return is_close;
 }
 
-
+void http_resp_redact_server_name(buffer_t *buf, transaction_t *transaction) {
+  if(!transaction->resp_header_complete) return;
+  char *data = buf->data;
+  char *end = data + buf->len;
+  char *p = data;
+  size_t exp_len = sizeof("Server:") - 1;
+  size_t len_fp = 0;
+  size_t len_lp = 0;
+  char *last_part = NULL;
+  while (p < end) {
+    char *line_end = p;
+    while (line_end + 1 < end && !(line_end[0] == '\r' && line_end[1] == '\n'))
+      line_end++;
+    if (
+      (size_t)(line_end-p) >= exp_len &&
+      strncasecmp(p, "Server:", exp_len) == 0
+    ) {
+      len_fp = (p+exp_len)-data;
+      last_part = (line_end+2 <= end) ? line_end+2 : end;
+      len_lp = end-last_part;
+      break;
+    }
+    if (line_end+2 > end) break;
+    p = line_end+2;
+  }
+  if (len_fp == 0) return;
+  const char new_name[] = " " SERVER_NAME "\r\n";
+  size_t len_nn = strlen(new_name);
+  if (len_lp > 0) memmove(data+len_fp+len_nn, last_part, len_lp);
+  memcpy(data+len_fp, new_name, len_nn);
+  buf->len = len_fp+len_nn+len_lp;
+  transaction->resp_header_len = find_double_crlf(data, buf->len, 0);
+  transaction->resp_len = buf->len;
+}
 
