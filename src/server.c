@@ -31,7 +31,7 @@ int main(int argc, char *argv[]) {
     if (strcmp(argv[i], "--DEBUG") == 0) debug = 1;
   }
   int timeout = debug ? 1000 : -1;
-  g_log_level = debug ? LOG_DEBUG : LOG_INFO;
+  g_log_level = debug ? LVL_DEBUG : LVL_INFO;
   signal(SIGPIPE, SIG_IGN);
   server_cfg = config_parse_file("config/rgnx.json");
   signal(SIGINT, handle_interrupt);
@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
       break;
     }
     if (n == 0) {
-      LOG_DEBUG("main: epoll_wait, tick tick one!");
+      LOG_DEBUG("main: epoll_wait - timeout!");
       continue;
     }
     LOG_DEBUG("main: backend_entry_count = %d ", backend_entry_count);
@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
       }
       fd_ctx_t *ctx = sevents[i].data.ptr;
       LOG_DEBUG(
-        "main: ctx->peer = %d, ctx->kind = %d, ctx->fd = %d, ctx->closing = %d",
+        "main: ctx->peer = %p, ctx->kind = %d, ctx->fd = %d, ctx->closing = %d",
         ctx->peer, ctx->kind, ctx->fd, ctx->closing
       );
       if (ctx->closing) continue;

@@ -1,13 +1,13 @@
 #include "log.h"
 #include <stdarg.h>
 
-log_level_t g_log_level = LOG_INFO;
+log_level_t g_log_level = LVL_INFO;
 
 static const char *level_str(log_level_t l) {
   switch (l) {
-    case LOG_DEBUG: return "DEBUG";
-    case LOG_INFO: return "INFO";
-    case LOG_WARN: return "WARN";
+    case LVL_DEBUG: return "DEBUG";
+    case LVL_INFO: return "INFO";
+    case LVL_WARN: return "WARN";
     default: return "ERROR";
   }
 }
