@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "http.h"
 #include "buffer.h"
+#include "log.h"
 
 const char *NOT_FOUND_HEADER =
   "HTTP/1.1 404 Not Found\r\n"
@@ -92,29 +93,44 @@ const char *http_get_mime_type(const char *ext) {
 }
 
 char *http_resolve_static_path(const char *url) {
+  LOG_DEBUG("http_resolve_static_path: called!");
   const char *prefix = server_cfg.static_prefix;
-  const char *root = server_cfg.static_root;
-  const char *index = "/index.html";
+  const char *sroot = server_cfg.static_root;
+  const char *index_file = "index.html";
   size_t ulen = strlen(url);
   size_t plen = strlen(prefix);
   if (strncmp(url, prefix, plen) != 0) return NULL;
+  char *out = malloc(MAX_RESOLVE_PATH_LEN);
   if (ulen == plen || (ulen == plen + 1 && url[plen] == '/')) {
-    size_t len = strlen(root) + strlen(index) + 1;
-    char *out = malloc(len);
-    if (!out) return NULL;
-    strcpy(out, root);
-    strcat(out, index);
+    snprintf(out, MAX_RESOLVE_PATH_LEN, "%s/%s", sroot, index_file);
     return out;
   }
   if (url[plen] == '/') {
-    const char *rest = url + plen;
-    size_t len = strlen(root) + strlen(rest) + 1;
-    char *out = malloc(len);
-    if (!out) return NULL;
-    strcpy(out, root);
-    strcat(out, rest);
-    return out;
+    const char *rest = url + plen + 1;
+    snprintf(out, MAX_RESOLVE_PATH_LEN, "%s/%s", sroot, rest);
+    char *real = malloc(MAX_RESOLVE_PATH_LEN);
+    if (!realpath(out, real)) {
+      free(out);
+      free(real);
+      return NULL;
+    }
+    free(out);
+    char rroot[MAX_RESOLVE_PATH_LEN];
+    if (!realpath(sroot, rroot)) {
+      free(real);
+      return NULL;
+    }
+    size_t rrlen = strlen(rroot);
+    if (
+      (strncmp(real, rroot, rrlen) != 0) ||
+      (real[rrlen] != '\0' && real[rrlen] != '/')
+    ) {
+      free(real);
+      return NULL;
+    }
+    return real;
   }
+  free(out);
   return NULL;
 }
 

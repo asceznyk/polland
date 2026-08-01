@@ -155,6 +155,7 @@ bool client_borrow_backend(int epfd, client_t *client) {
     }
   }
   LOG_DEBUG("client_borrow_backend: backend = %p", backend);
+  backend->pool_state = BE_IN_USE;
   backend_attach_client(client, backend);
   backend_epoll_toggle_write(epfd, backend, 1);
   return true;

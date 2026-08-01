@@ -10,8 +10,16 @@ int backend_entry_count = 0;
 
 backend_t *backend_registry[MAX_UPSTREAM_CONNECTIONS] = {0};
 
+void backend_show_registry() {
+  for (int i = 0; i < MAX_UPSTREAM_CONNECTIONS; i++) {
+    backend_t *b = backend_registry[i];
+    if (b == NULL) continue;
+    LOG_DEBUG("backend_show_registry: %p", b);
+  }
+}
+
 void backend_mark_closing(backend_t *backend) {
-  LOG_DEBUG("backend_mark_closing: backend->fd = %d", backend->fd);
+  LOG_DEBUG("backend_mark_closing: backend = %p", backend);
   if (backend->ctx.closing || backend->closing) return;
   backend->ctx.closing = true;
   backend->closing = true;
@@ -21,6 +29,7 @@ void backend_init(backend_t *backend, int fd) {
   backend->fd = fd;
   backend->closing = false;
   backend->client = NULL;
+  backend->pool_state = BE_IDLE;
   backend->in_state = BE_CONNECTING;
   backend->out_state = BE_READING_HEADERS;
   backend->in_has_body = false;
@@ -122,7 +131,7 @@ backend_t *backend_build_pool(int epfd, int k) {
 }
 
 void backend_remove_from_pool(backend_t *backend) {
-  LOG_DEBUG("backend_remove_from_pool: backend->fd = %d, backend_pool = %p", backend->fd, backend_pool);
+  LOG_DEBUG("backend_remove_from_pool: backend = %p, backend_pool = %p", backend, backend_pool);
   backend_t **addr = &backend_pool;
   if (backend->prev) backend->prev->next = backend->next;
   else *addr = backend->next;
@@ -137,15 +146,17 @@ backend_t *backend_detach_from_pool() {
   if (backend_pool) backend_pool->prev = NULL;
   backend->next = NULL;
   backend->prev = NULL;
+  backend->pool_state = BE_IN_USE;
   return backend;
 }
 
 void backend_attach_to_pool(backend_t *backend) {
-  LOG_DEBUG("backend_attach_to_pool: backend_pool = %p!", backend_pool);
+  LOG_DEBUG("backend_attach_to_pool: backend = %p, backend_pool = %p!", backend, backend_pool);
   assert(backend->next == NULL);
   assert(backend->prev == NULL);
   backend->prev = NULL;
   backend->next = backend_pool;
+  backend->pool_state = BE_IDLE;
   if (backend_pool) backend_pool->prev = backend;
   backend_pool = backend;
 }
@@ -173,7 +184,7 @@ void backend_detach_client(
 }
 
 bool backend_epoll_register(int epfd, backend_t *backend) {
-  LOG_DEBUG("backend_epoll_register: backend->fd = %d", backend->fd);
+  LOG_DEBUG("backend_epoll_register: backend = %p", backend);
   int flags = fcntl(backend->fd, F_GETFL, 0);
   if (flags < 0 || fcntl(backend->fd, F_SETFL, flags | O_NONBLOCK) < 0) {
     close(backend->fd);
@@ -208,21 +219,25 @@ void backend_epoll_toggle_write(
 
 void backend_destroy(int epfd, backend_t *backend) {
   if (backend->fd == -1) return;
-  LOG_DEBUG("backend_destroy: destroying backend with fd = %d", backend->fd);
+  LOG_DEBUG("backend_destroy: destroying backend %p!", backend);
   epoll_ctl(epfd, EPOLL_CTL_DEL, backend->fd, NULL);
   close(backend->fd);
   backend->fd = -1;
   backend_registry[backend->ridx] = backend_registry[backend_entry_count-1];
   backend_registry[backend->ridx]->ridx = backend->ridx;
+  backend_registry[backend_entry_count-1] = NULL;
   backend_entry_count--;
-  LOG_DEBUG("backend_destroy: destroying %p!", backend);
   free(backend);
 }
 
 void backend_prepare_closing(backend_t *backend) {
-  LOG_DEBUG("backend_prepare_closing: %p!!", backend);
+  LOG_DEBUG("backend_prepare_closing: %p!", backend);
   if (backend->client) backend_detach_client(backend->client, backend);
-  backend_remove_from_pool(backend);
+  LOG_DEBUG(
+    "backend_prepare_closing: backend->next = %p, backend->prev = %p, backend->pool_state = %d",
+    backend->next, backend->prev, backend->pool_state
+  );
+  if (backend->pool_state == BE_IDLE) backend_remove_from_pool(backend);
   backend_mark_closing(backend);
 }
 
@@ -243,12 +258,7 @@ int backend_handle_err(int epfd, backend_t *backend) {
   LOG_DEBUG("backend_handle_err: %p", backend);
   client_t *client = backend->client;
   if (!client) return -1;
-  if (!backend->closing)
-    backend_prepare_closing(backend);
-  else {
-    backend_detach_client(client, backend);
-    backend_remove_from_pool(backend);
-  }
+  backend_prepare_closing(backend);
   int err = 0;
   socklen_t len = sizeof(err);
   getsockopt(backend->fd, SOL_SOCKET, SO_ERROR, &err, &len);
@@ -279,15 +289,19 @@ static int backend_handle_idle(backend_t *backend) {
   return 0;
 }
 
-void backend_return_client(backend_t *backend) {
+int backend_return_client(backend_t *backend) {
   LOG_DEBUG("backend_return_client: %p", backend);
   if (!backend || backend->closing) {
-    if (backend->closing) LOG_DEBUG("backend_return_client: backend->closing!");
-    return;
+    if (backend->closing) {
+      LOG_DEBUG("backend_return_client: backend->closing!");
+      return -1;
+    }
+    return 0;
   }
   backend_detach_client(backend->client, backend);
   backend_reset_states(backend);
   backend_attach_to_pool(backend);
+  return 0;
 }
 
 int backend_handle_read(int epfd, backend_t *backend) {
@@ -368,9 +382,11 @@ int backend_handle_read(int epfd, backend_t *backend) {
     backend_mark_closing(backend);
     return -1;
   }
-  if (backend->out_state == BE_RESP_COMPLETE) backend_return_client(backend);
   if (client->out_stream.len > 0) client_epoll_toggle_write(epfd, client, 1);
-  return 0;
+  int status = 0;
+  if (backend->out_state == BE_RESP_COMPLETE)
+    status = backend_return_client(backend);
+  return status;
 }
 
 int backend_handle_write(int epfd, backend_t *backend) {

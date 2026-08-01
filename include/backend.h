@@ -29,6 +29,10 @@ struct backend_t {
   int fd;
   int ridx;
   enum {
+    BE_IDLE,
+    BE_IN_USE
+  } pool_state;
+  enum {
     BE_CONNECTING,
     BE_WRITING_REQ,
     BE_REQ_COMPLETE
@@ -45,6 +49,8 @@ struct backend_t {
 extern backend_t *backend_pool;
 
 extern backend_t *backend_registry[MAX_UPSTREAM_CONNECTIONS];
+
+void backend_show_registry();
 
 backend_t *backend_create(int fd);
 
@@ -76,7 +82,7 @@ void backend_detach_client(
   backend_t *backend
 );
 
-void backend_return_client(backend_t *backend);
+int backend_return_client(backend_t *backend);
 
 int backend_handle_err(int epfd, backend_t *backend);
 

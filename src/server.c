@@ -93,6 +93,7 @@ int main(int argc, char *argv[]) {
       continue;
     }
     LOG_DEBUG("main: backend_entry_count = %d ", backend_entry_count);
+    backend_show_registry();
     free_client_head = NULL;
     LOG_DEBUG("main: n = %d", n);
     for (int i = 0; i < n; i++) {
